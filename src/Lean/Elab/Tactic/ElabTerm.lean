@@ -89,7 +89,8 @@ def sortMVarIdsByIndex [MonadMCtx m] [Monad m] (mvarIds : List MVarId) : m (List
 /--
   Execute `k`, and collect new "holes" in the resulting expression.
 -/
-def withCollectingNewGoalsFrom (k : TacticM Expr) (tagSuffix : Name) (allowNaturalHoles := false) : TacticM (Expr × List MVarId) :=
+def withCollectingNewGoalsFrom (k : TacticM Expr) (tagSuffix : Name) (allowNaturalHoles := false)
+    (onlyNewGoals := false) : TacticM (Expr × List MVarId) :=
   /-
   When `allowNaturalHoles = true`, unassigned holes should become new metavariables, including `_`s.
   Thus, we set `holesAsSynthethicOpaque` to true if it is not already set to `true`.
@@ -124,26 +125,63 @@ where
     let newMVarIds ← getMVarsNoDelayed val
     /- ignore let-rec auxiliary variables, they are synthesized automatically later -/
     let newMVarIds ← newMVarIds.filterM fun mvarId => return !(← Term.isLetRecAuxMVar mvarId)
-    let newMVarIds ← if allowNaturalHoles then
-      pure newMVarIds.toList
-    else
+    /- If `onlyNewGoals := true`, filter out all old goals. -/
+    let newMVarIds ← if onlyNewGoals then
+        filterOldMVars newMVarIds mvarCounterSaved
+      else
+        pure newMVarIds
+    /- The following `unless … do` block guards against unassigned natural mvarids created during
+    `k` in the case that `allowNaturalHoles := false`. If we pass this block without aborting, we
+    can be assured that `newMVarIds` does not contain unassigned natural mvars created during `k`.
+    Note that in all cases we must allow `newMVarIds` to contain unassigned natural mvars which
+    were created *before* `k`; this is the purpose of `mvarCounterSaved`, which lets us distinguish
+    mvars created before `k` from those created during and after. See issue #2434. -/
+    unless allowNaturalHoles do
       let naturalMVarIds ← newMVarIds.filterM fun mvarId => return (← mvarId.getKind).isNatural
-      let syntheticMVarIds ← newMVarIds.filterM fun mvarId => return !(← mvarId.getKind).isNatural
-      let naturalMVarIds ← filterOldMVars naturalMVarIds mvarCounterSaved
+      -- If `onlyNewGoals`, then old mvars have already been filtered out.
+      -- As such, we only need to filter if `!onlyNewGoals`.
+      let naturalMVarIds ← if onlyNewGoals then
+          pure naturalMVarIds
+        else
+          filterOldMVars naturalMVarIds mvarCounterSaved
       logUnassignedAndAbort naturalMVarIds
-      pure syntheticMVarIds.toList
     /-
     We sort the new metavariable ids by index to ensure the new goals are ordered using the order the metavariables have been created.
     See issue #1682.
     Potential problem: if elaboration of subterms is delayed the order the new metavariables are created may not match the order they
     appear in the `.lean` file. We should tell users to prefer tagged goals.
     -/
-    let newMVarIds ← sortMVarIdsByIndex newMVarIds
+    let newMVarIds ← sortMVarIdsByIndex newMVarIds.toList
     tagUntaggedGoals (← getMainTag) tagSuffix newMVarIds
     return (val, newMVarIds)
 
-def elabTermWithHoles (stx : Syntax) (expectedType? : Option Expr) (tagSuffix : Name) (allowNaturalHoles := false) : TacticM (Expr × List MVarId) := do
+/-- Elaborates `stx` and collects the `MVarId`s of any encountered holes.
+
+With `allowNaturalHoles := false` (the default), any newly-created natural holes (`_`) which cannot
+be synthesized during elaboration cause `elabTermWithHoles` to fail. Natural holes in `stx` which
+were created prior to elaboration are permitted.
+
+With `onlyNewGoals := false` (the default), all mvars encountered in `stx` appear in the returned
+`List MVarId`. Otherwise, if `onlyNewGoals := true`, only `MVarId`s which are created during the
+elaboration of `stx` are returned.
+
+Unnamed `MVarId`s are renamed to share the main goal's tag. If multiple unnamed goals are
+encountered, `tagSuffix` is appended to the main goal's tag along with a numerical index.
+
+Note:
+
+* All parts of `elabTermWithHoles` operate at the current `MCtxDepth`, and therefore may assign
+metavariables.
+
+* When `allowNaturalHoles := true`, `stx` is elaborated under `withAssignableSyntheticOpaque`,
+meaning that `.syntheticOpaque` metavariables might be assigned during elaboration. This is a
+consequence of the implementation.
+
+* Metavariables with delayed assignments are excluded from the returned list in all cases. -/
+def elabTermWithHoles (stx : Syntax) (expectedType? : Option Expr) (tagSuffix : Name)
+    (allowNaturalHoles := false) (onlyNewGoals := false) : TacticM (Expr × List MVarId) := do
   withCollectingNewGoalsFrom (elabTermEnsuringType stx expectedType?) tagSuffix allowNaturalHoles
+    onlyNewGoals
 
 /-- If `allowNaturalHoles == true`, then we allow the resultant expression to contain unassigned "natural" metavariables.
    Recall that "natutal" metavariables are created for explicit holes `_` and implicit arguments. They are meant to be
@@ -151,14 +189,18 @@ def elabTermWithHoles (stx : Syntax) (expectedType? : Option Expr) (tagSuffix : 
    "Synthetic" metavariables are meant to be filled by tactics and are usually created using the synthetic hole notation `?<hole-name>`. -/
 def refineCore (stx : Syntax) (tagSuffix : Name) (allowNaturalHoles : Bool) : TacticM Unit := do
   withMainContext do
-    let (val, mvarIds') ← elabTermWithHoles stx (← getMainTarget) tagSuffix allowNaturalHoles
+    let (val, mvarIds') ←
+      elabTermWithHoles stx (← getMainTarget) tagSuffix allowNaturalHoles (onlyNewGoals := true)
     let mvarId ← getMainGoal
     let val ← instantiateMVars val
-    unless val == mkMVar mvarId do
+    /- If `val` is simply the main goal, preserve it. Otherwise, it would get thrown away since it's older than the elaboration. -/
+    if val == mkMVar mvarId then
+      replaceMainGoal (mvarId :: mvarIds')
+    else
       if val.findMVar? (· == mvarId) matches some _ then
         throwError "'refine' tactic failed, value{indentExpr val}\ndepends on the main goal metavariable '{mkMVar mvarId}'"
       mvarId.assign val
-    replaceMainGoal mvarIds'
+      replaceMainGoal mvarIds'
 
 @[builtin_tactic «refine»] def evalRefine : Tactic := fun stx =>
   match stx with
