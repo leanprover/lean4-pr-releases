@@ -67,3 +67,9 @@ jobs:
         env:
           # The token used here must have `workflow` privileges.
           GITHUB_TOKEN: ${{ secrets.PR_RELEASES_TOKEN }}
+      - name: Add label
+        if: ${{ steps.workflow-info.outputs.pullRequestNumber != '' }}
+        uses: actions-ecosystem/action-add-labels@v1
+        with:
+          number: ${{ steps.workflow-info.outputs.pullRequestNumber }}
+          labels: toolchain-available
