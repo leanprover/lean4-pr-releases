@@ -660,7 +660,14 @@ extern "C" LEAN_EXPORT obj_res lean_io_remove_dir(b_obj_arg p, obj_arg) {
 }
 
 extern "C" LEAN_EXPORT obj_res lean_io_rename(b_obj_arg from, b_obj_arg to, lean_object * /* w */) {
-    if (std::rename(string_cstr(from), string_cstr(to)) == 0) {
+#if defined(LEAN_WINDOWS)
+    std::wstring wfrom(string_cstr(from), string_cstr(from) + string_size(from));
+    std::wstring wto(string_cstr(to), string_cstr(to) + string_size(to));
+    bool ok = MoveFileExW(wfrom.c_str(), wto.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+#else
+    bool ok = std::rename(string_cstr(from), string_cstr(to)) == 0;
+#endif
+    if (ok) {
         return io_result_mk_ok(box(0));
     } else {
         std::ostringstream s;
