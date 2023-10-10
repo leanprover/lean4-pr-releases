@@ -502,7 +502,7 @@ def workerMain (opts : Options) : IO UInt32 := do
     -- want to do that in the case of the worker processes, which can produce non-terminating tasks evaluating user code
     o.flush
     e.flush
-    IO.Process.exit exitCode.toUInt8
+    IO.Process.exit exitCode
   catch err =>
     e.putStrLn s!"worker initialization error: {err}"
     return (1 : UInt32)

@@ -654,7 +654,14 @@ def run (args : SpawnArgs) : IO String := do
     throw <| IO.userError <| "process '" ++ args.cmd ++ "' exited with code " ++ toString out.exitCode
   pure out.stdout
 
-@[extern "lean_io_exit"] opaque exit : UInt8 → IO α
+/--
+Immediately terminate the current process using the standard exit procedure.
+
+On Unix-based systems, only the lower 8 bits of the exit code
+(i.e., codes ≤ 255) will be preserved for processes that `wait` on this one.
+On Windows, the full 32-bits will be accessible.
+-/
+@[extern "lean_io_exit"] opaque exit : UInt32 → IO α
 
 end Process
 
