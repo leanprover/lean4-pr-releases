@@ -187,6 +187,8 @@ section Initialization
       paths.loadDynlibPaths.forM loadDynlib
       paths.srcPath.mapM realPathNormalized
     | 2 => pure []  -- no lakefile.lean
+    -- error from `--no-build`
+    | 3 => throwServerError s!"Imports are out of date and must be rebuilt; use the \"Refresh File Dependencies\" command in your editor\n\n{stdout}"
     | _ => throwServerError s!"`{cmdStr}` failed:\n{stdout}\nstderr:\n{stderr}"
 
   def compileHeader (m : DocumentMeta) (hOut : FS.Stream) (opts : Options) (hasWidgets : Bool)
@@ -502,7 +504,7 @@ def workerMain (opts : Options) : IO UInt32 := do
     -- want to do that in the case of the worker processes, which can produce non-terminating tasks evaluating user code
     o.flush
     e.flush
-    IO.Process.exit exitCode.toUInt8
+    IO.Process.exit exitCode
   catch err =>
     e.putStrLn s!"worker initialization error: {err}"
     return (1 : UInt32)

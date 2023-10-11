@@ -930,7 +930,7 @@ extern "C" LEAN_EXPORT obj_res lean_io_wait_any(b_obj_arg task_list, obj_arg) {
     return io_result_mk_ok(v);
 }
 
-extern "C" LEAN_EXPORT obj_res lean_io_exit(uint8_t code, obj_arg /* w */) {
+extern "C" LEAN_EXPORT obj_res lean_io_exit(uint32_t code, obj_arg /* w */) {
     exit(code);
 }
 
