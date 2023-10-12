@@ -1792,22 +1792,61 @@ private def isExprDefEqExpensive (t : Expr) (s : Expr) : MetaM Bool := do
     if (← isDefEqUnitLike t s) then return true else
     isDefEqOnFailure t s
 
-private def mkCacheKey (t : Expr) (s : Expr) : Expr × Expr :=
-  if Expr.quickLt t s then (t, s) else (s, t)
+inductive DefEqCacheKind where
+  | transient -- problem has mvars or is using nonstandard configuration, we should use transient cache
+  | permanent -- problem does not have mvars and we are using standard config, we can use one persistent cache.
 
-private def getCachedResult (key : Expr × Expr) : MetaM LBool := do
-  match (← get).cache.defEq.find? key with
+private def getDefEqCacheKind (t s : Expr) : MetaM DefEqCacheKind := do
+  if t.hasMVar || s.hasMVar || (← read).canUnfold?.isSome then
+    return .transient
+  else
+    return .permanent
+
+/--
+Structure for storing defeq cache key information.
+-/
+structure DefEqCacheKeyInfo where
+  kind : DefEqCacheKind
+  key  : Expr × Expr
+
+private def mkCacheKey (t s : Expr) : MetaM DefEqCacheKeyInfo := do
+  let kind ← getDefEqCacheKind t s
+  let key := if Expr.quickLt t s then (t, s) else (s, t)
+  return { key, kind }
+
+private def getCachedResult (keyInfo : DefEqCacheKeyInfo) : MetaM LBool := do
+  let cache ← match keyInfo.kind with
+    | .transient => pure (← get).cache.defEqTrans
+    | .permanent => pure (← get).cache.defEqPerm
+  let cache := match (← getTransparency) with
+    | .reducible => cache.reducible
+    | .instances => cache.instances
+    | .default   => cache.default
+    | .all       => cache.all
+  match cache.find? keyInfo.key with
   | some val => return val.toLBool
   | none => return .undef
 
-private def cacheResult (key : Expr × Expr) (result : Bool) : MetaM Unit := do
-  /-
-  We must ensure that all assigned metavariables in the key are replaced by their current assignments.
-  Otherwise, the key is invalid after the assignment is "backtracked".
-  See issue #1870 for an example.
-  -/
-  let key := (← instantiateMVars key.1, ← instantiateMVars key.2)
-  modifyDefEqCache fun c => c.insert key result
+def DefEqCache.update (cache : DefEqCache) (mode : TransparencyMode) (key : Expr × Expr) (result : Bool) : DefEqCache :=
+  match mode with
+  | .reducible => { cache with reducible := cache.reducible.insert key result }
+  | .instances => { cache with instances := cache.instances.insert key result }
+  | .default   => { cache with default   := cache.default.insert key result }
+  | .all       => { cache with all       := cache.all.insert key result }
+
+private def cacheResult (keyInfo : DefEqCacheKeyInfo) (result : Bool) : MetaM Unit := do
+  let mode ← getTransparency
+  let key := keyInfo.key
+  match keyInfo.kind with
+  | .permanent => modifyDefEqPermCache fun c => c.update mode key result
+  | .transient =>
+    /-
+    We must ensure that all assigned metavariables in the key are replaced by their current assignments.
+    Otherwise, the key is invalid after the assignment is "backtracked".
+    See issue #1870 for an example.
+    -/
+    let key := (← instantiateMVars key.1, ← instantiateMVars key.2)
+    modifyDefEqTransientCache fun c => c.update mode key result
 
 @[export lean_is_expr_def_eq]
 partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecDepth do
@@ -1839,7 +1878,7 @@ partial def isExprDefEqAuxImpl (t : Expr) (s : Expr) : MetaM Bool := withIncRecD
     let t ← instantiateMVars t
     let s ← instantiateMVars s
     let numPostponed ← getNumPostponed
-    let k := mkCacheKey t s
+    let k ← mkCacheKey t s
     match (← getCachedResult k) with
     | .true  =>
       trace[Meta.isDefEq.cache] "cache hit 'true' for {t} =?= {s}"
