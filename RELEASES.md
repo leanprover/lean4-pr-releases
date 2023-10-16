@@ -10,6 +10,8 @@ Please check the [releases](https://github.com/leanprover/lean4/releases) page f
 v4.3.0 (development in progress)
 ---------
 
+* `Prop`-valued inductive types and structures now [live in `Prop` by default](https://github.com/leanprover/lean4/pull/2695).
+
 v4.2.0
 ---------
 
