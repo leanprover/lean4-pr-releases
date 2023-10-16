@@ -448,7 +448,6 @@ where
     match u, rOffset with
     | .max u v,  rOffset   => go u rOffset; go v rOffset
     | .imax u v, rOffset   => go u rOffset; go v rOffset
-    | .zero,     _         => return ()
     | .succ u,   rOffset+1 => go u rOffset
     | u,         rOffset   =>
       if rOffset == 0 && u == r then
