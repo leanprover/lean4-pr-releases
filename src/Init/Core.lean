@@ -1684,7 +1684,7 @@ axiom ofReduceNat (a b : Nat) (h : reduceNat a = b) : a = b
 `IsAssociative op` says that `op` is an associative operation,
 i.e. `(a ∘ b) ∘ c = a ∘ (b ∘ c)`. It is used by the `ac_rfl` tactic.
 -/
-class IsAssociative {α : Sort u} (op : α → α → α) where
+class IsAssociative {α : Sort u} (op : α → α → α) : Type where
   /-- An associative operation satisfies `(a ∘ b) ∘ c = a ∘ (b ∘ c)`. -/
   assoc : (a b c : α) → op (op a b) c = op a (op b c)
 
@@ -1692,7 +1692,7 @@ class IsAssociative {α : Sort u} (op : α → α → α) where
 `IsCommutative op` says that `op` is a commutative operation,
 i.e. `a ∘ b = b ∘ a`. It is used by the `ac_rfl` tactic.
 -/
-class IsCommutative {α : Sort u} (op : α → α → α) where
+class IsCommutative {α : Sort u} (op : α → α → α) : Type where
   /-- A commutative operation satisfies `a ∘ b = b ∘ a`. -/
   comm : (a b : α) → op a b = op b a
 
@@ -1701,7 +1701,7 @@ class IsCommutative {α : Sort u} (op : α → α → α) where
 i.e. `a ∘ a = a`. It is used by the `ac_rfl` tactic
 (which also simplifies up to idempotence when available).
 -/
-class IsIdempotent {α : Sort u} (op : α → α → α) where
+class IsIdempotent {α : Sort u} (op : α → α → α) : Type where
   /-- An idempotent operation satisfies `a ∘ a = a`. -/
   idempotent : (x : α) → op x x = x
 
@@ -1710,7 +1710,7 @@ class IsIdempotent {α : Sort u} (op : α → α → α) where
 i.e. `a ∘ e = a = e ∘ a`. It is used by the `ac_rfl` tactic
 (which also simplifies neutral elements when available).
 -/
-class IsNeutral {α : Sort u} (op : α → α → α) (neutral : α) where
+class IsNeutral {α : Sort u} (op : α → α → α) (neutral : α) : Type where
   /-- A neutral element can be cancelled on the left: `e ∘ a = a`. -/
   left_neutral : (a : α) → op neutral a = a
   /-- A neutral element can be cancelled on the right: `a ∘ e = a`. -/

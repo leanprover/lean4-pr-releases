@@ -807,7 +807,7 @@ decidability instance instead of the proposition, which has no code).
 If a proposition `p` is `Decidable`, then `(by decide : p)` will prove it by
 evaluating the decidability instance to `isTrue h` and returning `h`.
 -/
-class inductive Decidable (p : Prop) where
+class inductive Decidable (p : Prop) : Type where
   /-- Prove that `p` is decidable by supplying a proof of `¬p` -/
   | isFalse (h : Not p) : Decidable p
   /-- Prove that `p` is decidable by supplying a proof of `p` -/
