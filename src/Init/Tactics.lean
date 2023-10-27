@@ -39,8 +39,11 @@ be a `let` or function type.
 syntax (name := intro) "intro" notFollowedBy("|") (ppSpace colGt term:max)* : tactic
 
 /--
-`intros x...` behaves like `intro x...`, but then keeps introducing (anonymous)
-hypotheses until goal is not of a function type.
+Introduces zero or more hypotheses, optionally naming them.
+- `intros` is equivalent to repeatedly applying `intro`,
+  introducing anonymous variables so long as the goal is of a function type.
+- `intros x y ...` is equivalent to `intro x y ...`.
+  Each argument can be either an identifier or a `_`.
 -/
 syntax (name := intros) "intros" (ppSpace colGt (ident <|> hole))* : tactic
 
