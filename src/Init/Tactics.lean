@@ -106,6 +106,7 @@ example : let n := 1; let k := 2; n + k = 3 := by
   /- n✝ : Nat := 1
      k✝ : Nat := 2
      ⊢ n✝ + k✝ = 3 -/
+  rfl
 ```
 -/
 syntax (name := intros) "intros" (ppSpace colGt (ident <|> hole))* : tactic
