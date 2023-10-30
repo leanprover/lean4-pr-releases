@@ -42,8 +42,8 @@ syntax (name := intro) "intro" notFollowedBy("|") (ppSpace colGt term:max)* : ta
 Introduces zero or more hypotheses, optionally naming them.
 
 - `intros` is equivalent to repeatedly applying `intro`
-  until the goal is not an obvious candidate for `intro`.
-  That is, so long as the goal is a `let` or a pi type (e.g. an implication, function, or universal quantifier),
+  until the goal is not an obvious candidate for `intro`, which is to say
+  that so long as the goal is a `let` or a pi type (e.g. an implication, function, or universal quantifier),
   the `intros` tactic will introduce an anonymous hypothesis.
   This tactic does not unfold definitions.
 
