@@ -114,15 +114,17 @@ partial def packDomain (fixedPrefix : Nat) (preDefs : Array PreDefinition) : Met
 where
   /-- Return `some i` if `e` is a `preDefs[i]` application -/
   isAppOfPreDef? (e : Expr) : Option Nat := do
-    let f := e.getAppFn
+    let f := e.getRecAppFn
     guard f.isConst
     preDefs.findIdx? (·.declName == f.constName!)
 
   packApplications (e : Expr) (arities : Array Nat) (preDefsNew : Array PreDefinition) : MetaM Expr := do
     let pack (e : Expr) (funIdx : Nat) : MetaM Expr := do
-      let f := e.getAppFn
+      let f := e.getRecAppFn
       let args := e.getAppArgs
       let fNew := mkConst preDefsNew[funIdx]!.declName f.constLevels!
+      let fNew := match e.getAppFn with |.mdata b _ => .mdata b fNew | _ => fNew
+      -- ^ TODO: This calls for nicer abstraction
       let fNew := mkAppN fNew args[:fixedPrefix]
       let Expr.forallE _ d .. ← inferType fNew | unreachable!
       let argNew ← mkUnaryArg d args[fixedPrefix:]
