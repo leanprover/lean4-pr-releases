@@ -338,19 +338,24 @@ def parserOfStack.parenthesizer (offset : Nat) (_prec : Nat := 0) : Parenthesize
   let stx := st.stxTrav.parents.back.getArg (st.stxTrav.idxs.back - offset)
   parenthesizerForKind stx.getKind
 
+/-- Applies the `wrap` function to the given syntax and then copies `SourceInfo` from the given syntax to the result. -/
+private def addParens (wrap : Syntax → Unhygienic Syntax) (stx : Syntax) : Syntax := Unhygienic.run do
+  let pstx ← wrap stx
+  return pstx.setInfo (SourceInfo.fromRef stx)
+
 @[builtin_category_parenthesizer term]
 def term.parenthesizer : CategoryParenthesizer | prec => do
-  maybeParenthesize `term true (fun stx => Unhygienic.run `(($(⟨stx⟩)))) prec $
+  maybeParenthesize `term true (addParens fun stx => `(($(⟨stx⟩)))) prec $
     parenthesizeCategoryCore `term prec
 
 @[builtin_category_parenthesizer tactic]
 def tactic.parenthesizer : CategoryParenthesizer | prec => do
-  maybeParenthesize `tactic false (fun stx => Unhygienic.run `(tactic|($(⟨stx⟩)))) prec $
+  maybeParenthesize `tactic false (addParens fun stx => `(tactic|($(⟨stx⟩)))) prec $
     parenthesizeCategoryCore `tactic prec
 
 @[builtin_category_parenthesizer level]
 def level.parenthesizer : CategoryParenthesizer | prec => do
-  maybeParenthesize `level false (fun stx => Unhygienic.run `(level|($(⟨stx⟩)))) prec $
+  maybeParenthesize `level false (addParens fun stx => `(level|($(⟨stx⟩)))) prec $
     parenthesizeCategoryCore `level prec
 
 @[builtin_category_parenthesizer rawStx]
