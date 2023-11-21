@@ -23,7 +23,7 @@ namespace PrettyPrinter
 def ppCategory (cat : Name) (stx : Syntax) : CoreM Format := do
   let opts ← getOptions
   let stx := (sanitizeSyntax stx).run' { options := opts }
-  parenthesizeCategory cat stx >>= formatCategory cat
+  parenthesizeCategory cat stx (forceParens := getPPParens opts) >>= formatCategory cat
 
 def ppTerm (stx : Term) : CoreM Format := ppCategory `term stx
 
