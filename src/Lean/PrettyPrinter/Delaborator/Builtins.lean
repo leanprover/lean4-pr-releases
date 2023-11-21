@@ -600,7 +600,11 @@ def delabLit : Delab := do
 @[builtin_delab app.OfNat.ofNat]
 def delabOfNat : Delab := whenPPOption getPPCoercions do
   let .app (.app _ (.lit (.natVal n))) _ ← getExpr | failure
-  return quote n
+  if ← getPPOption getPPNumeralTypes then
+    let ty ← SubExpr.withNaryArg 0 delab
+    `(($(quote n) : $ty))
+  else
+    return quote n
 
 -- `@OfDecimal.ofDecimal _ _ m s e` ~> `m*10^(sign * e)` where `sign == 1` if `s = false` and `sign = -1` if `s = true`
 @[builtin_delab app.OfScientific.ofScientific]
