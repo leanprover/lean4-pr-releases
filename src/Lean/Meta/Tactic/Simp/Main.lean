@@ -250,6 +250,9 @@ private partial def reduce (e : Expr) : SimpM Expr := withIncRecDepth do
     match (← reduceRecMatcher? e) with
     | some e => return (← reduce e)
     | none   => pure ()
+  if cfg.zeta then
+    if let some (_, _, v, b) := e.letFun? then
+      return (← reduce <| b.instantiate1 v)
   match (← unfold? e) with
   | some e' =>
     trace[Meta.Tactic.simp.rewrite] "unfold {mkConst e.getAppFn.constName!}, {e} ==> {e'}"

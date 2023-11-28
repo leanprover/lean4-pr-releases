@@ -658,7 +658,9 @@ where
       visit (f.beta e.getAppArgs)
 
   visitApp (e : Expr) : M Arg := do
-    if let .const declName _ := e.getAppFn then
+    if let some (n, t, v, b) := e.letFun? then
+      visitLet (.letE n t v b (nonDep := true)) #[]
+    else if let .const declName _ := e.getAppFn then
       if declName == ``Quot.lift then
         visitQuotLift e
       else if declName == ``Quot.mk then
@@ -725,11 +727,8 @@ where
       pushElement (.fun funDecl)
       return .fvar funDecl.fvarId
 
-  visitMData (mdata : MData) (e : Expr) : M Arg := do
-    if let some (.app (.lam n t b ..) v) := letFunAnnotation? (.mdata mdata e) then
-      visitLet (.letE n t v b (nonDep := true)) #[]
-    else
-      visit e
+  visitMData (_mdata : MData) (e : Expr) : M Arg := do
+    visit e
 
   visitProj (s : Name) (i : Nat) (e : Expr) : M Arg := do
     match (← visit e) with

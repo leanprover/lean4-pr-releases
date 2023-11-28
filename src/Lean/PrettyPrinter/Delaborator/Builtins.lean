@@ -395,19 +395,20 @@ def delabAppMatch : Delab := whenPPOption getPPNotation <| whenPPOption getPPMat
     return Syntax.mkApp stx st.moreArgs
 
 /--
-  Delaborate applications of the form `(fun x => b) v` as `let_fun x := v; b`
+  Delaborate applications of the form `letFun v (fun x => b)` as `let_fun x := v; b`
 -/
-def delabLetFun : Delab := do
-  let stxV ← withAppArg delab
-  withAppFn do
-    let Expr.lam n _ b _ ← getExpr | unreachable!
-    let n ← getUnusedName n b
-    let stxB ← withBindingBody n delab
-    if ← getPPOption getPPLetVarTypes <||> getPPOption getPPAnalysisLetVarType then
-      let stxT ← withBindingDomain delab
-      `(let_fun $(mkIdent n) : $stxT := $stxV; $stxB)
-    else
-      `(let_fun $(mkIdent n) := $stxV; $stxB)
+@[builtin_delab app.letFun]
+def delabLetFun : Delab := whenPPOption getPPNotation do
+  guard <| (← getExpr).getAppNumArgs == 4
+  let Expr.lam n _ b _ := (← getExpr).appArg! | failure
+  let n ← getUnusedName n b
+  let stxV ← withAppFn <| withAppArg delab
+  let stxB ← withAppArg <| withBindingBody n delab
+  if ← getPPOption getPPLetVarTypes <||> getPPOption getPPAnalysisLetVarType then
+    let stxT ← SubExpr.withNaryArg 0 delab
+    `(let_fun $(mkIdent n) : $stxT := $stxV; $stxB)
+  else
+    `(let_fun $(mkIdent n) := $stxV; $stxB)
 
 @[builtin_delab mdata]
 def delabMData : Delab := do
@@ -417,8 +418,6 @@ def delabMData : Delab := do
       `(.($s)) -- We only include the inaccessible annotation when we are delaborating patterns
     else
       return s
-  else if isLetFun (← getExpr) && getPPNotation (← getOptions) then
-    withMDataExpr <| delabLetFun
   else if let some _ := isLHSGoal? (← getExpr) then
     withMDataExpr <| withAppFn <| withAppArg <| delab
   else
