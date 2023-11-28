@@ -394,13 +394,25 @@ def delabAppMatch : Delab := whenPPOption getPPNotation <| whenPPOption getPPMat
         `(match $[$st.discrs:matchDiscr],* with $[| $pats,* => $st.rhss]*)
     return Syntax.mkApp stx st.moreArgs
 
+/-- Annotation key to use in hack for overapplied `let_fun` notation. -/
+def delabLetFunKey : Name := `_delabLetFun
+
 /--
-  Delaborate applications of the form `letFun v (fun x => b)` as `let_fun x := v; b`
+  Delaborate applications of the form `letFun v (fun x => b)` as `let_fun x := v; b`.
 -/
 @[builtin_delab app.letFun]
 def delabLetFun : Delab := whenPPOption getPPNotation do
-  guard <| (← getExpr).getAppNumArgs == 4
-  let Expr.lam n _ b _ := (← getExpr).appArg! | failure
+  let e ← getExpr
+  let nargs := e.getAppNumArgs
+  if 4 < nargs then
+    -- It's overapplied. Hack: insert metadata around the first four arguments and delaborate again.
+    -- This will cause the app delaborator to delaborate `(letFun v f) x1 ... xn` with `letFun v f` as the function.
+    let args := e.getAppArgs
+    let f := mkAppN e.getAppFn (args.extract 0 4)
+    let e' := mkAppN (mkAnnotation delabLetFunKey f) (args.extract 4 args.size)
+    return (← withTheReader SubExpr ({· with expr := e'}) delab)
+  guard <| e.getAppNumArgs == 4
+  let Expr.lam n _ b _ := e.appArg! | failure
   let n ← getUnusedName n b
   let stxV ← withAppFn <| withAppArg delab
   let stxB ← withAppArg <| withBindingBody n delab

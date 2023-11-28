@@ -8,3 +8,10 @@ example (a b : Nat) (h1 : a = 0) (h2 : b = 0) : (let_fun x := a + 1; x + x) > b 
   simp (config := { zeta := false }) [h1]
   trace_state
   simp (config := { decide := true }) [h2]
+
+#check (show Nat → Nat from id) 1
+
+example (a b : Nat) (h : a > b) : (show Nat → Nat from id) a > b := by
+  simp
+  trace_state
+  exact h

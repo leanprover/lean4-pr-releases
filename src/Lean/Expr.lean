@@ -1654,21 +1654,41 @@ def setAppPPExplicitForExposingMVars (e : Expr) : Expr :=
   | _      => e
 
 /--
-Return true if `e` is a `let_fun` expression.
+Return true if `e` is a `let_fun` expression, an expression of the form `letFun v f`.
+Ideally `f` is a lambda, but we do not require that here.
+Warning: if the `let_fun` is applied to additional arguments (such as in `(let_fun f := id; id) 1`), this function returns `false`.
 -/
 def isLetFun (e : Expr) : Bool := e.isAppOfArity ``letFun 4
 
 /-- Recognizes a `let_fun` expression. For `let_fun n : t := v; b`, returns `some (n, t, v, b)`,
-which are the arguments to `Lean.Expr.letE`.
+which are the first four arguments to `Lean.Expr.letE`.
+Warning: if the `let_fun` is applied to additional arguments (such as in `(let_fun f := id; id) 1`), this function returns `none`.
 
-If in the encoding of `let_fun` the argument to `letFun` is eta reduced, uses `Name.anonymous` for the binder name. -/
+`let_fun` expressions are encoded as `letFun v (fun (n : t) => b)`.
+They can be created using `Lean.Meta.mkLetFun`.
+
+If in the encoding of `let_fun` the last argument to `letFun` is eta reduced, this returns `Name.anonymous` for the binder name. -/
 def letFun? (e : Expr) : Option (Name × Expr × Expr × Expr) :=
   match e with
-  | .app (.app (.app (.app (.const ``letFun _) α) _β) v) f =>
+  | .app (.app (.app (.app (.const ``letFun _) t) _β) v) f =>
     match f with
-    | .lam n _ b _ => some (n, α, v, b)
-    | _ => some (.anonymous, α, v, .app f (.bvar 0))
+    | .lam n _ b _ => some (n, t, v, b)
+    | _ => some (.anonymous, t, v, .app f (.bvar 0))
   | _ => none
+
+/-- Like `Lean.Expr.letFun?`, but handles the case when the `let_fun` expression is possibly applied to additional arguments.
+Returns those arguments in addition to the values returned by `letFun?`. -/
+def letFunAppArgs? (e : Expr) : Option (Array Expr × Name × Expr × Expr × Expr) := do
+  guard <| 4 ≤ e.getAppNumArgs
+  guard <| e.isAppOf ``letFun
+  let args := e.getAppArgs
+  let t := args[0]!
+  let v := args[2]!
+  let f := args[3]!
+  let rest := args.extract 4 args.size
+  match f with
+  | .lam n _ b _ => some (rest, n, t, v, b)
+  | _ => some (rest, .anonymous, t, v, .app f (.bvar 0))
 
 end Expr
 
