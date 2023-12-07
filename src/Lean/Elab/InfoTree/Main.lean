@@ -8,7 +8,7 @@ import Lean.Meta.PPGoal
 
 namespace Lean.Elab.ContextInfo
 
-variable [Monad m] [MonadEnv m] [MonadMCtx m] [MonadOptions m] [MonadResolveName m] [MonadNameGenerator m]
+variable [Monad m] [MonadEnv m] [MonadMCtx m] [MonadOptions m] [MonadResolveName m] [MonadNameGenerator m] [MonadTermCtx m]
 
 def saveNoFileMap : m ContextInfo := return {
     env           := (← getEnv)
@@ -18,6 +18,7 @@ def saveNoFileMap : m ContextInfo := return {
     currNamespace := (← getCurrNamespace)
     openDecls     := (← getOpenDecls)
     ngen          := (← getNGen)
+    parentDecl?   := (← getDeclName?)
   }
 
 def save [MonadFileMap m] : m ContextInfo := do
@@ -311,7 +312,7 @@ def withInfoTreeContext [MonadFinally m] (x : m α) (mkInfoTree : PersistentArra
 /-- Resets the trees state `t₀`, runs `x` to produce a new trees
 state `t₁` and sets the state to be `t₀ ++ (InfoTree.context Γ <$> t₁)`
 where `Γ` is the context derived from the monad state. -/
-def withSaveInfoContext [MonadNameGenerator m] [MonadFinally m] [MonadEnv m] [MonadOptions m] [MonadMCtx m] [MonadResolveName m] [MonadFileMap m] (x : m α) : m α := do
+def withSaveInfoContext [MonadNameGenerator m] [MonadFinally m] [MonadEnv m] [MonadOptions m] [MonadMCtx m] [MonadResolveName m] [MonadTermCtx m] [MonadFileMap m] (x : m α) : m α := do
   if (← getInfoState).enabled then
     let treesSaved ← getResetInfoTrees
     Prod.fst <$> MonadFinally.tryFinally' x fun _ => do

@@ -51,6 +51,9 @@ instance : Monad TacticM :=
   let i := inferInstanceAs (Monad TacticM);
   { pure := i.pure, bind := i.bind }
 
+instance : MonadTermCtx TacticM where
+  getDeclName? := Term.getDeclName?
+
 def getGoals : TacticM (List MVarId) :=
   return (← get).goals
 

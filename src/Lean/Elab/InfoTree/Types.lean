@@ -21,6 +21,7 @@ structure ContextInfo where
   mctx          : MetavarContext := {}
   options       : Options        := {}
   currNamespace : Name           := Name.anonymous
+  parentDecl?   : Option Name    := none
   openDecls     : List OpenDecl  := []
   ngen          : NameGenerator -- We must save the name generator to implement `ContextInfo.runMetaM` and making we not create `MVarId`s used in `mctx`.
 
@@ -194,7 +195,7 @@ structure InfoState where
   trees      : PersistentArray InfoTree := {}
   deriving Inhabited
 
-class MonadInfoTree (m : Type → Type)  where
+class MonadInfoTree (m : Type → Type) where
   getInfoState    : m InfoState
   modifyInfoState : (InfoState → InfoState) → m Unit
 
@@ -206,5 +207,10 @@ instance [MonadLift m n] [MonadInfoTree m] : MonadInfoTree n where
 
 def setInfoState [MonadInfoTree m] (s : InfoState) : m Unit :=
   modifyInfoState fun _ => s
+
+class MonadTermCtx (m : Type → Type) where
+  getDeclName? : m (Option Name)
+
+export MonadTermCtx (getDeclName?)
 
 end Lean.Elab
