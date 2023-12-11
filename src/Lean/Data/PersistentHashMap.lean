@@ -112,18 +112,20 @@ partial def insertAux [BEq α] [Hashable α] : Node α β → USize → USize �
     else match newNode with
       | ⟨Node.entries _, h⟩ => False.elim (nomatch h)
       | ⟨Node.collision keys vals heq, _⟩ =>
-        let rec traverse (i : Nat) (entries : Node α β × Bool) : Node α β × Bool :=
+        let rec traverse (i : Nat) (entries : Node α β) : Node α β :=
           if h : i < keys.size then
             let k := keys[i]
             have : i < vals.size := heq ▸ h
             let v := vals[i]
             let h := hash k |>.toUSize
             let h := div2Shift h (shift * (depth - 1))
-            let (entries', replaced) := insertAux entries.1 h depth k v
-            traverse (i+1) (entries', entries.2 || replaced)
+            -- We don't need to capture the `replaced` flag here,
+            -- as the result from `insertAtCollisionNode` already tells us if we are replacing a value.
+            let (entries', _) := insertAux entries h depth k v
+            traverse (i+1) entries'
           else
             entries
-        traverse 0 (mkEmptyEntries, replaced)
+        (traverse 0 mkEmptyEntries, replaced)
   | Node.entries entries, h, depth, k, v =>
     let j     := (mod2Shift h shift).toNat
     -- We can't use `entries.modify` here, as we need to return `replaced`.
