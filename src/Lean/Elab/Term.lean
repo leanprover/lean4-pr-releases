@@ -374,7 +374,7 @@ def getMVarDecl (mvarId : MVarId) : TermElabM MetavarDecl := return (← getMCtx
 instance : MonadTermCtx TermElabM where
   getDeclName? := getDeclName?
 
-/-- Execute `x` with `declName? := name`. See `getDeclName?`. -/
+/-- Execute `withSaveInfoContext x` with `declName? := name`. See `getDeclName?`. -/
 def withDeclName (name : Name) (x : TermElabM α) : TermElabM α :=
   withReader (fun ctx => { ctx with declName? := name }) <| withSaveInfoContext x
 
