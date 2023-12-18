@@ -1,5 +1,0 @@
-(17 : Fin (22 : Nat)) : Fin (22 : Nat)
-2 : Nat
-(2 : Nat) : Nat
-(2 : Nat) + (1 : Nat) = (3 : Nat) : Prop
-@OfNat.ofNat.{0} Nat 2 (instOfNatNat 2) : Nat
