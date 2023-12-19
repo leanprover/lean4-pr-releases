@@ -371,12 +371,12 @@ def getLetRecsToLift : TermElabM (List LetRecToLift) := return (← get).letRecs
 /-- Return the declaration of the given metavariable -/
 def getMVarDecl (mvarId : MVarId) : TermElabM MetavarDecl := return (← getMCtx).getDecl mvarId
 
-instance : MonadTermCtx TermElabM where
-  getDeclName? := getDeclName?
+instance : MonadParentDecl TermElabM where
+  getParentDeclName? := getDeclName?
 
-/-- Execute `withSaveInfoContext x` with `declName? := name`. See `getDeclName?`. -/
+/-- Execute `withSaveParentDeclInfoContext x` with `declName? := name`. See `getDeclName?`. -/
 def withDeclName (name : Name) (x : TermElabM α) : TermElabM α :=
-  withReader (fun ctx => { ctx with declName? := name }) <| withSaveInfoContext x
+  withReader (fun ctx => { ctx with declName? := name }) <| withSaveParentDeclInfoContext x
 
 /-- Update the universe level parameter names. -/
 def setLevelNames (levelNames : List Name) : TermElabM Unit :=

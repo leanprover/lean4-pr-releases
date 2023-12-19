@@ -6,11 +6,11 @@ Authors: Wojciech Nawrocki, Leonardo de Moura, Sebastian Ullrich
 -/
 import Lean.Meta.PPGoal
 
-namespace Lean.Elab.ContextInfo
+namespace Lean.Elab.CommandContextInfo
 
-variable [Monad m] [MonadEnv m] [MonadMCtx m] [MonadOptions m] [MonadResolveName m] [MonadNameGenerator m] [MonadTermCtx m]
+variable [Monad m] [MonadEnv m] [MonadMCtx m] [MonadOptions m] [MonadResolveName m] [MonadNameGenerator m]
 
-def saveNoFileMap : m ContextInfo := return {
+def saveNoFileMap : m CommandContextInfo := return {
     env           := (← getEnv)
     fileMap       := default
     mctx          := (← getMCtx)
@@ -18,14 +18,13 @@ def saveNoFileMap : m ContextInfo := return {
     currNamespace := (← getCurrNamespace)
     openDecls     := (← getOpenDecls)
     ngen          := (← getNGen)
-    parentDecl?   := (← getDeclName?)
   }
 
-def save [MonadFileMap m] : m ContextInfo := do
+def save [MonadFileMap m] : m CommandContextInfo := do
   let ctx ← saveNoFileMap
   return { ctx with fileMap := (← getFileMap) }
 
-end ContextInfo
+end CommandContextInfo
 
 def CompletionInfo.stx : CompletionInfo → Syntax
   | dot i .. => i.stx
@@ -198,7 +197,7 @@ def Info.updateContext? : Option ContextInfo → Info → Option ContextInfo
 partial def InfoTree.format (tree : InfoTree) (ctx? : Option ContextInfo := none) : IO Format := do
   match tree with
   | hole id     => return .nestD f!"• ?{toString id.name}"
-  | context i t => format t i
+  | context i t => format t <| i.mergeIntoOuter? ctx?
   | node i cs   => match ctx? with
     | none => return "• <context-not-available>"
     | some ctx =>
@@ -309,20 +308,52 @@ def withInfoTreeContext [MonadFinally m] (x : m α) (mkInfoTree : PersistentArra
 @[inline] def withInfoContext [MonadFinally m] (x : m α) (mkInfo : m Info) : m α := do
   withInfoTreeContext x (fun trees => do return InfoTree.node (← mkInfo) trees)
 
-/-- Resets the trees state `t₀`, runs `x` to produce a new trees
-state `t₁` and sets the state to be `t₀ ++ (InfoTree.context Γ <$> t₁)`
-where `Γ` is the context derived from the monad state. -/
-def withSaveInfoContext [MonadNameGenerator m] [MonadFinally m] [MonadEnv m] [MonadOptions m] [MonadMCtx m] [MonadResolveName m] [MonadTermCtx m] [MonadFileMap m] (x : m α) : m α := do
-  if (← getInfoState).enabled then
-    let treesSaved ← getResetInfoTrees
-    Prod.fst <$> MonadFinally.tryFinally' x fun _ => do
-      let st    ← getInfoState
-      let trees ← st.trees.mapM fun tree => do
-        let tree := tree.substitute st.assignment
-        pure <| InfoTree.context (← ContextInfo.save) tree
-      modifyInfoTrees fun _ => treesSaved ++ trees
-  else
-    x
+private def withSavedPartialInfoContext [MonadFinally m]
+    (x : m α)
+    (ctx? : m (Option PartialContextInfo))
+    : m α := do
+  if !(← getInfoState).enabled then
+    return ← x
+  let treesSaved ← getResetInfoTrees
+  Prod.fst <$> MonadFinally.tryFinally' x fun _ => do
+    let st    ← getInfoState
+    let trees ← st.trees.mapM fun tree => do
+      let tree := tree.substitute st.assignment
+      match (← ctx?) with
+      | none =>
+        pure tree
+      | some ctx =>
+        pure <| InfoTree.context ctx tree
+    modifyInfoTrees fun _ => treesSaved ++ trees
+
+/--
+Resets the trees state `t₀`, runs `x` to produce a new trees state `t₁` and sets the state to be
+`t₀ ++ (InfoTree.context (PartialContextInfo.commandCtx Γ) <$> t₁)` where `Γ` is the context derived
+from the monad state.
+-/
+def withSaveInfoContext
+    [MonadNameGenerator m]
+    [MonadFinally m]
+    [MonadEnv m]
+    [MonadOptions m]
+    [MonadMCtx m]
+    [MonadResolveName m]
+    [MonadFileMap m]
+    (x : m α)
+    : m α := do
+  withSavedPartialInfoContext x do
+    return some <| .commandCtx (← CommandContextInfo.save)
+
+/--
+Resets the trees state `t₀`, runs `x` to produce a new trees state `t₁` and sets the state to be
+`t₀ ++ (InfoTree.context (PartialContextInfo.parentDeclCtx Γ) <$> t₁)` where `Γ` is the parent decl
+name provided by `MonadParentDecl m`.
+-/
+def withSaveParentDeclInfoContext [MonadFinally m] [MonadParentDecl m] (x : m α) : m α := do
+  withSavedPartialInfoContext x do
+    let some declName ← getParentDeclName?
+      | return none
+    return some <| .parentDeclCtx declName
 
 def getInfoHoleIdAssignment? (mvarId : MVarId) : m (Option InfoTree) :=
   return (← getInfoState).assignment[mvarId]

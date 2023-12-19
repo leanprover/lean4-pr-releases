@@ -12,18 +12,60 @@ import Lean.Data.Json
 
 namespace Lean.Elab
 
-/-- Context after executing `liftTermElabM`.
-   Note that the term information collected during elaboration may contain metavariables, and their
-   assignments are stored at `mctx`. -/
-structure ContextInfo where
+/--
+Context after executing `liftTermElabM`.
+Note that the term information collected during elaboration may contain metavariables, and their
+assignments are stored at `mctx`.
+-/
+structure CommandContextInfo where
   env           : Environment
   fileMap       : FileMap
   mctx          : MetavarContext := {}
   options       : Options        := {}
   currNamespace : Name           := Name.anonymous
-  parentDecl?   : Option Name    := none
   openDecls     : List OpenDecl  := []
   ngen          : NameGenerator -- We must save the name generator to implement `ContextInfo.runMetaM` and making we not create `MVarId`s used in `mctx`.
+
+/--
+Context from the root of the `InfoTree` up to this node.
+Note that the term information collected during elaboration may contain metavariables, and their
+assignments are stored at `mctx`.
+-/
+structure ContextInfo extends CommandContextInfo where
+  parentDecl? : Option Name := none
+
+/--
+Context for a sub-`InfoTree`.
+
+Within `InfoTree`, this must fulfill the invariant that every non-`commandCtx` `PartialContextInfo`
+node is always contained within a `commandCtx` node.
+-/
+inductive PartialContextInfo where
+  | commandCtx (info : CommandContextInfo)
+  | parentDeclCtx (parentDecl : Name)
+  -- TODO: More constructors for the different kinds of scopes `commandCtx` is currently
+  -- used for (e.g. eliminating `Info.updateContext?` would be nice!).
+
+/--
+Merges the `inner` partial context into the `outer` context s.t. fields of the `inner` context
+overwrite fields of the `outer` context. Panics if the invariant described in the documentation
+for `PartialContextInfo` is violated.
+
+When traversing an `InfoTree`, this function should be used to combine the context of outer
+nodes with the partial context of their subtrees. This ensures that the traversal has the context
+from the inner node to the root node of the `InfoTree` available, with partial contexts of
+inner nodes taking priority over contexts of outer nodes.
+-/
+def PartialContextInfo.mergeIntoOuter?
+    : (inner : PartialContextInfo) → (outer? : Option ContextInfo) → Option ContextInfo
+  | .commandCtx info, none =>
+    some { info with }
+  | .parentDeclCtx _, none =>
+    panic! "Unexpected incomplete InfoTree context info."
+  | .commandCtx innerInfo, some outer =>
+    some { outer with toCommandContextInfo := innerInfo }
+  | .parentDeclCtx innerParentDecl, some outer =>
+    some { outer with parentDecl? := innerParentDecl }
 
 /-- Base structure for `TermInfo`, `CommandInfo` and `TacticInfo`. -/
 structure ElabInfo where
@@ -168,8 +210,8 @@ inductive Info where
     `hole`s which are filled in later in the same way that unassigned metavariables are.
 -/
 inductive InfoTree where
-  /-- The context object is created by `liftTermElabM` at `Command.lean` -/
-  | context (i : ContextInfo) (t : InfoTree)
+  /-- The context object is created at appropriate points during elaboration -/
+  | context (i : PartialContextInfo) (t : InfoTree)
   /-- The children contain information for nested term elaboration and tactic evaluation -/
   | node (i : Info) (children : PersistentArray InfoTree)
   /-- The elaborator creates holes (aka metavariables) for tactics and postponed terms -/
@@ -208,9 +250,9 @@ instance [MonadLift m n] [MonadInfoTree m] : MonadInfoTree n where
 def setInfoState [MonadInfoTree m] (s : InfoState) : m Unit :=
   modifyInfoState fun _ => s
 
-class MonadTermCtx (m : Type → Type) where
-  getDeclName? : m (Option Name)
+class MonadParentDecl (m : Type → Type) where
+  getParentDeclName? : m (Option Name)
 
-export MonadTermCtx (getDeclName?)
+export MonadParentDecl (getParentDeclName?)
 
 end Lean.Elab
