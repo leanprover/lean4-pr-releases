@@ -26,6 +26,27 @@ def save [MonadFileMap m] : m CommandContextInfo := do
 
 end CommandContextInfo
 
+/--
+Merges the `inner` partial context into the `outer` context s.t. fields of the `inner` context
+overwrite fields of the `outer` context. Panics if the invariant described in the documentation
+for `PartialContextInfo` is violated.
+
+When traversing an `InfoTree`, this function should be used to combine the context of outer
+nodes with the partial context of their subtrees. This ensures that the traversal has the context
+from the inner node to the root node of the `InfoTree` available, with partial contexts of
+inner nodes taking priority over contexts of outer nodes.
+-/
+def PartialContextInfo.mergeIntoOuter?
+    : (inner : PartialContextInfo) → (outer? : Option ContextInfo) → Option ContextInfo
+  | .commandCtx info, none =>
+    some { info with }
+  | .parentDeclCtx _, none =>
+    panic! "Unexpected incomplete InfoTree context info."
+  | .commandCtx innerInfo, some outer =>
+    some { outer with toCommandContextInfo := innerInfo }
+  | .parentDeclCtx innerParentDecl, some outer =>
+    some { outer with parentDecl? := innerParentDecl }
+
 def CompletionInfo.stx : CompletionInfo → Syntax
   | dot i .. => i.stx
   | id stx .. => stx
