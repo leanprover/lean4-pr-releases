@@ -117,12 +117,11 @@ def mkDecEqCmds (indVal : InductiveVal) : TermElabM (Array Syntax) := do
 
 open Command
 
-def mkDecEq (declName : Name) : CommandElabM Bool := do
+def mkDecEq (declName : Name) : CommandElabM Unit := do
   let indVal ← getConstInfoInduct declName
   let cmds ← liftTermElabM <| mkDecEqCmds indVal
   withEnableInfoTree false do
     cmds.forM elabCommand
-  return true
 
 partial def mkEnumOfNat (declName : Name) : MetaM Unit := do
   let indVal ← getConstInfoInduct declName
@@ -190,15 +189,15 @@ def mkDecEqEnum (declName : Name) : CommandElabM Unit := do
   trace[Elab.Deriving.decEq] "\n{cmd}"
   elabCommand cmd
 
-def mkDecEqInstance (declName : Name) : CommandElabM Bool := do
+def mkDecEqInstance (declName : Name) : CommandElabM Unit := do
   if (← isEnumType declName) then
     mkDecEqEnum declName
-    return true
   else
     mkDecEq declName
 
 def mkDecEqInstanceHandler (declNames : Array Name) : CommandElabM Bool := do
-  declNames.foldlM (fun b n => andM (pure b) (mkDecEqInstance n)) true
+  declNames.forM mkDecEqInstance
+  return true
 
 builtin_initialize
   registerDerivingHandler `DecidableEq mkDecEqInstanceHandler
