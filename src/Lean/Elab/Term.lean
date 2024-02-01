@@ -11,6 +11,7 @@ import Lean.Elab.Config
 import Lean.Elab.Level
 import Lean.Elab.DeclModifiers
 import Lean.Elab.PreDefinition.WF.TerminationHint
+import Lean.Language.Basic
 
 namespace Lean.Elab
 
@@ -150,6 +151,26 @@ structure Cache where
    post : PHashMap CacheKey Snapshot := {}
    deriving Inhabited
 
+section Snapshot
+open Language
+
+structure TacticEvaluatedSnapshotData extends Language.Snapshot where
+  stx : Syntax
+deriving Nonempty
+
+/-- State after execution of a single synchronous tactic step. -/
+inductive TacticEvaluatedSnapshot where
+  | mk (data : TacticEvaluatedSnapshotData) (next : Array (SnapshotTask TacticEvaluatedSnapshot))
+deriving Nonempty
+/-- Potential, potentially parallel, follow-up tactic executions. -/
+-- In the first, non-parallel version, each task will depend on its predecessor
+abbrev TacticEvaluatedSnapshot.next : TacticEvaluatedSnapshot → Array (SnapshotTask TacticEvaluatedSnapshot)
+  | .mk _ next => next
+partial instance : ToSnapshotTree TacticEvaluatedSnapshot where
+  toSnapshotTree := go where
+    go := fun ⟨s, next⟩ => ⟨s.toSnapshot, next.map (·.map go)⟩
+
+end Snapshot
 end Tactic
 
 namespace Term
@@ -206,6 +227,7 @@ structure Context where
   inPattern        : Bool := false
   /-- Cache for the `save` tactic. It is only `some` in the LSP server. -/
   tacticCache?     : Option (IO.Ref Tactic.Cache) := none
+  snap?            : Option (Language.SnapshotBundle Tactic.TacticEvaluatedSnapshot) := none
   /--
   If `true`, we store in the `Expr` the `Syntax` for recursive applications (i.e., applications
   of free variables tagged with `isAuxDecl`). We store the `Syntax` using `mkRecAppWithSyntax`.

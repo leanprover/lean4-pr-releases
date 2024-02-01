@@ -34,6 +34,57 @@ structure State where
   traceState     : TraceState := {}
   deriving Nonempty
 
+section Snapshots
+open Language
+
+structure CommandFinishedSnapshot extends Language.Snapshot where
+  /-- Resulting elaboration state. -/
+  cmdState : State
+deriving Nonempty
+instance : Language.ToSnapshotTree CommandFinishedSnapshot where
+  toSnapshotTree s := ⟨s.toSnapshot, #[]⟩
+
+structure DefViewElabHeaderCore where
+  /--
+    Short name. Recall that all declarations in Lean 4 are potentially recursive. We use `shortDeclName` to refer
+    to them at `valueStx`, and other declarations in the same mutual block. -/
+  shortDeclName : Name
+  /-- Full name for this declaration. This is the name that will be added to the `Environment`. -/
+  declName      : Name
+  /-- Universe level parameter names explicitly provided by the user. -/
+  levelNames    : List Name
+  /-- Syntax objects for the binders occurring before `:`, we use them to populate the `InfoTree` when elaborating `valueStx`. -/
+  binderIds     : Array Syntax
+  /-- Number of parameters before `:`, it also includes auto-implicit parameters automatically added by Lean. -/
+  numParams     : Nat
+  /-- Type including parameters. -/
+  type          : Expr
+deriving Inhabited
+
+structure SignatureProcessedSnapshot extends Language.Snapshot where
+  view : DefViewElabHeaderCore
+  state : Term.SavedState
+  tac : Language.SnapshotTask Elab.Tactic.TacticEvaluatedSnapshot
+deriving Nonempty
+instance : Language.ToSnapshotTree SignatureProcessedSnapshot where
+  toSnapshotTree s := ⟨s.toSnapshot, #[s.tac.map (sync := true) toSnapshotTree]⟩
+
+/--
+  State after processing a command's signature and before executing its tactic body, if any. Other
+  commands should immediately proceed to `finished`. -/
+structure SignatureParsed where
+  sigSubstr? : Option Substring
+  processed : SnapshotTask SignatureProcessedSnapshot
+deriving Nonempty
+
+structure SignaturesParsedSnapshot extends Language.Snapshot where
+  sigs : Array SignatureParsed
+deriving Nonempty
+instance : Language.ToSnapshotTree SignaturesParsedSnapshot where
+  toSnapshotTree s := ⟨s.toSnapshot, s.sigs.map (·.processed.map (sync := true) toSnapshotTree)⟩
+
+end Snapshots
+
 structure Context where
   fileName       : String
   fileMap        : FileMap
@@ -43,6 +94,7 @@ structure Context where
   currMacroScope : MacroScope := firstFrontendMacroScope
   ref            : Syntax := Syntax.missing
   tacticCache?   : Option (IO.Ref Tactic.Cache)
+  snap?          : Option (Language.SnapshotBundle SignaturesParsedSnapshot)
 
 abbrev CommandElabCoreM (ε) := ReaderT Context $ StateRefT State $ EIO ε
 abbrev CommandElabM := CommandElabCoreM Exception

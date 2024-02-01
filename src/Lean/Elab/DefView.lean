@@ -35,6 +35,7 @@ structure DefView where
   binders       : Syntax
   type?         : Option Syntax
   value         : Syntax
+  snap?         : Option (Language.SnapshotBundle Command.SignatureProcessedSnapshot) := none
   deriving?     : Option (Array Syntax) := none
   deriving Inhabited
 

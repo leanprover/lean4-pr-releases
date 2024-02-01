@@ -60,7 +60,7 @@ we remain at "go two commands up" at this point.
 set_option linter.missingDocs true
 
 namespace Lean.Language.Lean
-open Lean.Elab
+open Lean.Elab Command
 open Lean.Parser
 
 private def pushOpt (a? : Option α) (as : Array α) : Array α :=
@@ -83,25 +83,6 @@ register_builtin_option showPartialSyntaxErrors : Bool := {
 
 /-! The hierarchy of Lean snapshot types -/
 
-/-- Final state of processing of a command. -/
-structure CommandFinishedSnapshot extends Snapshot where
-  /-- Resulting elaboration state. -/
-  cmdState : Command.State
-deriving Nonempty
-instance : ToSnapshotTree CommandFinishedSnapshot where
-  toSnapshotTree s := ⟨s.toSnapshot, #[]⟩
-
-/--
-  State after processing a command's signature and before executing its tactic body, if any. Other
-  commands should immediately proceed to `finished`. -/
--- TODO: tactics
-structure CommandSignatureProcessedSnapshot extends Snapshot where
-  /-- State after processing is finished. -/
-  finished : SnapshotTask CommandFinishedSnapshot
-deriving Nonempty
-instance : ToSnapshotTree CommandSignatureProcessedSnapshot where
-  toSnapshotTree s := ⟨s.toSnapshot, #[s.finished.map (sync := true) toSnapshotTree]⟩
-
 /-- State after a command has been parsed. -/
 structure CommandParsedSnapshotData extends Snapshot where
   /-- Syntax tree of the command. -/
@@ -109,8 +90,11 @@ structure CommandParsedSnapshotData extends Snapshot where
   /-- Resulting parser state. -/
   parserState : Parser.ModuleParserState
   /-- Signature processing task. -/
-  sig : SnapshotTask CommandSignatureProcessedSnapshot
+  sigs : SnapshotTask SignaturesParsedSnapshot
+  /-- State after processing is finished. -/
+  finished : SnapshotTask CommandFinishedSnapshot
 deriving Nonempty
+
 /-- State after a command has been parsed. -/
 -- workaround for lack of recursive structures
 inductive CommandParsedSnapshot where
@@ -128,15 +112,17 @@ abbrev CommandParsedSnapshot.next? : CommandParsedSnapshot →
 partial instance : ToSnapshotTree CommandParsedSnapshot where
   toSnapshotTree := go where
     go s := ⟨s.data.toSnapshot,
-      #[s.data.sig.map (sync := true) toSnapshotTree] |>
+      #[s.data.sigs.map (sync := true) toSnapshotTree,
+        s.data.finished.map (sync := true) toSnapshotTree] |>
         pushOpt (s.next?.map (·.map (sync := true) go))⟩
+
 
 /-- Cancels all significant computations from this snapshot onwards. -/
 partial def CommandParsedSnapshot.cancel (snap : CommandParsedSnapshot) : BaseIO Unit := do
   -- This is the only relevant computation right now
   -- TODO: cancel additional elaboration tasks if we add them without switching to implicit
   -- cancellation
-  snap.data.sig.cancel
+  snap.data.finished.cancel
   if let some next := snap.next? then
     -- recurse on next command (which may have been spawned just before we cancelled above)
     let _ ← IO.mapTask (sync := true) (·.cancel) next.task
@@ -317,7 +303,7 @@ where
   processHeader (stx : Syntax) (parserState : Parser.ModuleParserState) :
       LeanProcessingM (SnapshotTask HeaderProcessedSnapshot) := do
     let ctx ← read
-    SnapshotTask.ofIO ⟨0, ctx.input.endPos⟩ <|
+    SnapshotTask.ofIO (some ⟨0, ctx.input.endPos⟩) <|
     ReaderT.run (r := ctx) <|  -- re-enter reader in new task
     withHeaderExceptions (α := HeaderProcessedSnapshot) ({ · with success? := none }) do
       -- use `lake setup-file` if in language server
@@ -400,20 +386,19 @@ where
       -- is not `Inhabited`
       return .pure <| .mk (next? := none) {
         diagnostics := .empty, stx := .missing, parserState
-        sig := .pure {
-          diagnostics := .empty
-          finished := .pure { diagnostics := .empty, cmdState } } }
+        sigs := .pure { diagnostics := .empty, sigs := #[] }
+        finished := .pure { diagnostics := .empty, cmdState }
+      }
 
     let unchanged old : BaseIO CommandParsedSnapshot :=
       -- when syntax is unchanged, reuse command processing task as is
       if let some oldNext := old.next? then
         return .mk (data := old.data)
-          (next? := (← old.data.sig.bindIO (sync := true) fun oldSig =>
-            oldSig.finished.bindIO (sync := true) fun oldFinished =>
-              -- also wait on old command parse snapshot as parsing is cheap and may allow for
-              -- elaboration reuse
-              oldNext.bindIO (sync := true) fun oldNext => do
-                parseCmd oldNext old.data.parserState oldFinished.cmdState ctx))
+          (next? := (← old.data.finished.bindIO (sync := true) fun oldFinished =>
+            -- also wait on old command parse snapshot as parsing is cheap and may allow for
+            -- elaboration reuse
+            oldNext.bindIO (sync := true) fun oldNext => do
+              parseCmd oldNext old.data.parserState oldFinished.cmdState ctx))
       else return old  -- terminal command, we're done!
 
     -- fast path, do not even start new task for this snapshot
@@ -422,7 +407,7 @@ where
         if (← isBeforeEditPos nextCom.data.parserState.pos) then
           return .pure (← unchanged old)
 
-    SnapshotTask.ofIO ⟨parserState.pos, ctx.input.endPos⟩ do
+    SnapshotTask.ofIO (some ⟨parserState.pos, ctx.input.endPos⟩) do
       let beginPos := parserState.pos
       let scope := cmdState.scopes.head!
       let pmctx := {
@@ -439,29 +424,35 @@ where
         -- on first change, make sure to cancel all further old tasks
         old.cancel
 
-      let sig ← processCmdSignature stx cmdState msgLog.hasErrors beginPos ctx
+      let sigs ← IO.Promise.new
+      let finished ←
+        doElab stx cmdState msgLog.hasErrors beginPos
+          { old? := old?.map (·.data.sigs), new := sigs } ctx
+
       let next? ← if Parser.isTerminalCommand stx then pure none
         -- for now, wait on "command finished" snapshot before parsing next command
-        else some <$> (sig.bind (·.finished)).bindIO fun finished =>
+        else some <$> finished.bindIO fun finished =>
           parseCmd none parserState finished.cmdState ctx
       return .mk (next? := next?) {
         diagnostics := (← Snapshot.Diagnostics.ofMessageLog msgLog ctx.toProcessingContext)
         stx
         parserState
-        sig
+        sigs := { range? := none, task := sigs.result }
+        finished
       }
 
-  processCmdSignature (stx : Syntax) (cmdState : Command.State) (hasParseError : Bool)
-      (beginPos : String.Pos) :
-      LeanProcessingM (SnapshotTask CommandSignatureProcessedSnapshot) := do
+  doElab (stx : Syntax) (cmdState : Command.State) (hasParseError : Bool) (beginPos : String.Pos)
+      (snap : SnapshotBundle SignaturesParsedSnapshot) :
+      LeanProcessingM (SnapshotTask Command.CommandFinishedSnapshot) := do
     let ctx ← read
-
-    -- signature elaboration task; for now, does full elaboration
-    -- TODO: do tactic snapshots, reuse old state for them
     SnapshotTask.ofIO (stx.getRange?.getD ⟨beginPos, beginPos⟩) do
       let scope := cmdState.scopes.head!
       let cmdStateRef ← IO.mkRef { cmdState with messages := .empty }
-      let cmdCtx : Elab.Command.Context := { ctx with cmdPos := beginPos, tacticCache? := none }
+      let cmdCtx : Elab.Command.Context := { ctx with
+        cmdPos       := beginPos
+        tacticCache? := none
+        snap?        := some snap
+      }
       let (output, _) ←
         IO.FS.withIsolatedStreams (isolateStderr := stderrAsMessages.get scope.opts) do
           liftM (m := BaseIO) do
@@ -487,14 +478,12 @@ where
           data     := output
         }
       let cmdState := { cmdState with messages }
+      snap.new.resolve { sigs := #[], diagnostics := .empty }
       return {
-        diagnostics := .empty
-        finished := .pure {
-          diagnostics :=
-            (← Snapshot.Diagnostics.ofMessageLog cmdState.messages ctx.toProcessingContext)
-          infoTree? := some cmdState.infoState.trees[0]!
-          cmdState
-        }
+        diagnostics :=
+          (← Snapshot.Diagnostics.ofMessageLog cmdState.messages ctx.toProcessingContext)
+        infoTree? := some cmdState.infoState.trees[0]!
+        cmdState
       }
 
 private partial def getFinalEnv? (snap : InitialSnapshot) : Option Environment := do
@@ -505,7 +494,7 @@ where goCmd snap :=
   if let some next := snap.next? then
     goCmd next.get
   else
-    snap.data.sig.get.finished.get.cmdState.env
+    snap.data.finished.get.cmdState.env
 
 end Lean
 

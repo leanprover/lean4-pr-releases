@@ -244,6 +244,9 @@ def resetMessageLog : CoreM Unit :=
 def getMessageLog : CoreM MessageLog :=
   return (← get).messages
 
+def getResetMessageLog : CoreM MessageLog :=
+  getMessageLog <* resetMessageLog
+
 instance : MonadLog CoreM where
   getRef      := getRef
   getFileMap  := return (← read).fileMap

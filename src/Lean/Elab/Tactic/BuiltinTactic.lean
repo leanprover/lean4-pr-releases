@@ -24,13 +24,44 @@ open Parser.Tactic
 @[builtin_tactic Lean.Parser.Tactic.«done»] def evalDone : Tactic := fun _ =>
   done
 
-@[builtin_tactic seq1] def evalSeq1 : Tactic := fun stx => do
-  let args := stx[0].getArgs
-  for i in [:args.size] do
-    if i % 2 == 0 then
-      evalTactic args[i]!
-    else
-      saveTacticInfoForToken args[i]! -- add `TacticInfo` node for `;`
+@[builtin_tactic seq1] partial def evalSeq1 : Tactic := fun stx => do
+  goEven stx.getArgs.toList
+where
+  goEven : _ → TacticM _
+    | [] => return
+    | tac :: stxs => do
+      if let some snap := (← readThe Term.Context).snap? then
+        let mut (old?, oldNext?) := match snap.old?.map (·.get) with
+          | some (.mk old oldNext) => (some old, oldNext.get? 0)
+          | none => (none, none)
+        let next ← IO.Promise.new
+        snap.new.resolve <| TacticEvaluatedSnapshot.mk {
+          stx := tac
+          diagnostics := .empty
+        } #[{
+          range? := mkNullNode (tac :: stxs).toArray |>.getRange?
+          task := next.result }]
+        if old?.any (·.stx == tac) then
+          pure ()
+        else
+          oldNext? := none
+          withTheReader Term.Context ({ · with snap? := none }) do
+            evalTactic tac
+        withTheReader Term.Context ({ · with snap? := some {
+          new := next
+          old? := oldNext?
+        } }) do
+          goOdd stxs
+      else
+        evalTactic tac
+        goOdd stxs
+  goOdd
+    | [] => do
+      if let some snap := (← readThe Term.Context).snap? then
+        snap.new.resolve <| .mk { stx := .missing, diagnostics := .empty } #[]
+    | sep :: stxs => do
+      saveTacticInfoForToken sep -- add `TacticInfo` node for `;`
+      goEven stxs
 
 @[builtin_tactic paren] def evalParen : Tactic := fun stx =>
   evalTactic stx[1]
@@ -101,12 +132,7 @@ def addCheckpoints (stx : Syntax) : TacticM Syntax := do
 
 /-- Evaluate `sepByIndent tactic "; " -/
 def evalSepByIndentTactic (stx : Syntax) : TacticM Unit := do
-  let stx ← addCheckpoints stx
-  for arg in stx.getArgs, i in [:stx.getArgs.size] do
-    if i % 2 == 0 then
-      evalTactic arg
-    else
-      saveTacticInfoForToken arg
+  evalSeq1 stx
 
 @[builtin_tactic tacticSeq1Indented] def evalTacticSeq1Indented : Tactic := fun stx =>
   evalSepByIndentTactic stx[0]

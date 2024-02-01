@@ -20,27 +20,8 @@ namespace Lean.Elab
 open Lean.Parser.Term
 
 /-- `DefView` after elaborating the header. -/
-structure DefViewElabHeader where
-  ref           : Syntax
-  modifiers     : Modifiers
-  /-- Stores whether this is the header of a definition, theorem, ... -/
-  kind          : DefKind
-  /--
-    Short name. Recall that all declarations in Lean 4 are potentially recursive. We use `shortDeclName` to refer
-    to them at `valueStx`, and other declarations in the same mutual block. -/
-  shortDeclName : Name
-  /-- Full name for this declaration. This is the name that will be added to the `Environment`. -/
-  declName      : Name
-  /-- Universe level parameter names explicitly provided by the user. -/
-  levelNames    : List Name
-  /-- Syntax objects for the binders occurring before `:`, we use them to populate the `InfoTree` when elaborating `valueStx`. -/
-  binderIds     : Array Syntax
-  /-- Number of parameters before `:`, it also includes auto-implicit parameters automatically added by Lean. -/
-  numParams     : Nat
-  /-- Type including parameters. -/
-  type          : Expr
-  /-- `Syntax` object the body/value of the definition. -/
-  valueStx      : Syntax
+structure DefViewElabHeader extends DefView, Command.DefViewElabHeaderCore where
+  tacSnap? : Option (Language.SnapshotBundle Tactic.TacticEvaluatedSnapshot)
   deriving Inhabited
 
 namespace Term
@@ -135,6 +116,27 @@ private def elabHeaders (views : Array DefView) : TermElabM (Array DefViewElabHe
   withAutoBoundImplicitForbiddenPred (fun n => expandedDeclIds.any (·.shortName == n)) do
     let mut headers := #[]
     for view in views, ⟨shortDeclName, declName, levelNames⟩ in expandedDeclIds do
+      let mkNewSnap new := do
+                let rangeStx := match view.value with
+                  | `(Parser.Command.declVal| := $body $_suffix:suffix $[$_where]?) => body
+                  | _ => view.value
+                return { range? := rangeStx.getRange?, task := new.result }
+      if let some snap := view.snap? then
+        if let some old := snap.old? then
+          let old := old.get
+          old.state.restore
+          let new ← IO.Promise.new
+          snap.new.resolve { old with
+            tac := (← mkNewSnap new)
+          }
+          headers := headers.push { old.view, view with
+            tacSnap? := some {
+              old? := old.tac
+              new
+            }
+          }
+          continue
+
       let newHeader ← withRef view.ref do
         addDeclarationRanges declName view.ref
         applyAttributesAt declName view.modifiers.attrs .beforeElaboration
@@ -165,14 +167,24 @@ private def elabHeaders (views : Array DefView) : TermElabM (Array DefViewElabHe
               let pendingMVarIds ← getMVars type
               discard <| logUnassignedUsingErrorInfos pendingMVarIds <|
                 getPendindMVarErrorMessage views
-            let newHeader := {
-              ref           := view.ref
-              modifiers     := view.modifiers
-              kind          := view.kind
+            let newHeader : Command.DefViewElabHeaderCore := {
               shortDeclName := shortDeclName
               declName, type, levelNames, binderIds
               numParams     := xs.size
-              valueStx      := view.value : DefViewElabHeader }
+            }
+            let newHeader := { view, newHeader with
+              tacSnap?      := (← view.snap?.mapM fun snap => do
+                let new ← IO.Promise.new
+                snap.new.resolve {
+                  diagnostics := {
+                    id? := none -- TODO
+                    msgLog := (← Core.getResetMessageLog) }
+                  view := newHeader
+                  state := (← saveState)
+                  tac := (← mkNewSnap new)
+                }
+                return { old? := none, new })
+            }
             check headers newHeader
             return newHeader
       headers := headers.push newHeader
@@ -252,13 +264,16 @@ private def declValToTerminationHint (declVal : Syntax) : TermElabM WF.Terminati
 
 private def elabFunValues (headers : Array DefViewElabHeader) : TermElabM (Array Expr) :=
   headers.mapM fun header => withDeclName header.declName <| withLevelNames header.levelNames do
-    let valStx ← liftMacroM <| declValToTerm header.valueStx
+    let valStx ← liftMacroM <| declValToTerm header.value
     forallBoundedTelescope header.type header.numParams fun xs type => do
       -- Add new info nodes for new fvars. The server will detect all fvars of a binder by the binder's source location.
       for i in [0:header.binderIds.size] do
         -- skip auto-bound prefix in `xs`
         addLocalVarInfo header.binderIds[i]! xs[header.numParams - header.binderIds.size + i]!
-      let val ← elabTermEnsuringType valStx type
+      let val ← try elabTermEnsuringType valStx type finally
+        -- TEMP
+        if let some snap := header.tacSnap? then
+          snap.new.resolve <| .mk { diagnostics := .empty, stx := .missing } #[]
       mkLambdaFVars xs val
 
 private def collectUsed (headers : Array DefViewElabHeader) (values : Array Expr) (toLift : List LetRecToLift)
@@ -641,7 +656,7 @@ def pushMain (preDefs : Array PreDefinition) (sectionVars : Array Expr) (mainHea
     : TermElabM (Array PreDefinition) :=
   mainHeaders.size.foldM (init := preDefs) fun i preDefs => do
     let header := mainHeaders[i]!
-    let termination ← declValToTerminationHint header.valueStx
+    let termination ← declValToTerminationHint header.value
     let termination ← termination.checkVars header.numParams mainVals[i]!
     let value ← mkLambdaFVars sectionVars mainVals[i]!
     let type ← mkForallFVars sectionVars header.type
@@ -836,11 +851,36 @@ end Term
 namespace Command
 
 def elabMutualDef (ds : Array Syntax) : CommandElabM Unit := do
-  let views ← ds.mapM fun d => do
+  let substr? := (mkNullNode ds).getSubstring?
+  let snap? := (← read).snap?
+  let mut views := #[]
+  let mut sigSnaps := #[]
+  for h : i in [0:ds.size] do
+    let d := ds[i]
     let modifiers ← elabModifiers d[0]
     if ds.size > 1 && modifiers.isNonrec then
       throwErrorAt d "invalid use of 'nonrec' modifier in 'mutual' block"
-    mkDefView modifiers d[1]
+    let mut view ← mkDefView modifiers d[1]
+    if let some snap := snap? then
+      let new ← IO.Promise.new
+      let sigSubstr? := return { (← substr?) with stopPos := (← view.value.getPos?) }
+      view := { view with snap? := some {
+        old? := do
+          let old ← snap.old?
+          let oldSig ← old.get.sigs[i]?
+          let sigSubstr ← sigSubstr?
+          guard <| oldSig.sigSubstr?.any (·.sameAs sigSubstr)
+          oldSig.processed
+        new
+      } }
+      sigSnaps := sigSnaps.push {
+        sigSubstr?
+        processed := { range? := d.getRange?, task := new.result }
+      }
+    views := views.push view
+  if let some snap := snap? then
+    -- no non-fatal diagnostics at this point
+    snap.new.resolve { sigs := sigSnaps, diagnostics := .empty }
   runTermElabM fun vars => Term.elabMutualDef vars views
 
 end Command

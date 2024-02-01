@@ -57,6 +57,7 @@ def runCommandElabM (snap : Snapshot) (meta : DocumentMeta) (c : CommandElabM α
     fileName := meta.uri,
     fileMap := meta.text,
     tacticCache? := none
+    snap? := none
   }
   c.run ctx |>.run' snap.cmdState
 
