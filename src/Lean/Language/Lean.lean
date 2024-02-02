@@ -83,6 +83,14 @@ register_builtin_option showPartialSyntaxErrors : Bool := {
 
 /-! The hierarchy of Lean snapshot types -/
 
+/-- Snapshot after elaboration of the entire command. -/
+structure CommandFinishedSnapshot extends Language.Snapshot where
+  /-- Resulting elaboration state. -/
+  cmdState : State
+deriving Nonempty
+instance : Language.ToSnapshotTree CommandFinishedSnapshot where
+  toSnapshotTree s := ⟨s.toSnapshot, #[]⟩
+
 /-- State after a command has been parsed. -/
 structure CommandParsedSnapshotData extends Snapshot where
   /-- Syntax tree of the command. -/
@@ -90,7 +98,7 @@ structure CommandParsedSnapshotData extends Snapshot where
   /-- Resulting parser state. -/
   parserState : Parser.ModuleParserState
   /-- Signature processing task. -/
-  sigs : SnapshotTask SignaturesParsedSnapshot
+  sigs : SnapshotTask HeadersParsedSnapshot
   /-- State after processing is finished. -/
   finished : SnapshotTask CommandFinishedSnapshot
 deriving Nonempty
@@ -386,7 +394,7 @@ where
       -- is not `Inhabited`
       return .pure <| .mk (next? := none) {
         diagnostics := .empty, stx := .missing, parserState
-        sigs := .pure { diagnostics := .empty, sigs := #[] }
+        sigs := .pure { diagnostics := .empty, headers := #[] }
         finished := .pure { diagnostics := .empty, cmdState }
       }
 
@@ -442,8 +450,8 @@ where
       }
 
   doElab (stx : Syntax) (cmdState : Command.State) (hasParseError : Bool) (beginPos : String.Pos)
-      (snap : SnapshotBundle SignaturesParsedSnapshot) :
-      LeanProcessingM (SnapshotTask Command.CommandFinishedSnapshot) := do
+      (snap : SnapshotBundle HeadersParsedSnapshot) :
+      LeanProcessingM (SnapshotTask CommandFinishedSnapshot) := do
     let ctx ← read
     SnapshotTask.ofIO (stx.getRange?.getD ⟨beginPos, beginPos⟩) do
       let scope := cmdState.scopes.head!
@@ -478,7 +486,7 @@ where
           data     := output
         }
       let cmdState := { cmdState with messages }
-      snap.new.resolve { sigs := #[], diagnostics := .empty }
+      snap.new.resolve { headers := #[], diagnostics := .empty }
       return {
         diagnostics :=
           (← Snapshot.Diagnostics.ofMessageLog cmdState.messages ctx.toProcessingContext)

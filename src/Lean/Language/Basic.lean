@@ -138,13 +138,30 @@ def SnapshotTask.get (t : SnapshotTask α) : α :=
 def SnapshotTask.get? (t : SnapshotTask α) : BaseIO (Option α) :=
   return if (← IO.hasFinished t.task) then some t.task.get else none
 
-structure SnapshotBundle (α : Type) where
-  old? : Option (SnapshotTask α)
-  new  : IO.Promise α
+/--
+Pair of (optional) old snapshot task usable for incremental reuse and new snapshot promise for
+incremental reporting. Inside the elaborator, we build snapshots by carrying such bundles and then
+checking if we can reuse `old?` if set or else redoing the corresponding elaboration step. In either
+case, we derive new bundles for nested snapshots, if any, and finally `resolve` `new` to the result.
 
-def SnapshotBundle.filterOld (bundle : SnapshotBundle α) (f : SnapshotTask α → Bool) :
-    SnapshotBundle α :=
-  { bundle with old? := bundle.old?.filter f }
+Note that failing to `resolve` a created promise will block the language server indefinitely!
+Corresponding `IO.Promise.new` calls should come with a "definitely resolved in ..." comment
+explaining how this is avoided in each case.
+
+In the future, the 1-element history `old?` may be replaced with a global cache indexed by strong
+hashes but the promise will still need to be passed through the elaborator.
+-/
+structure SnapshotBundle (α : Type) where
+  /--
+  Snapshot task of corresponding elaboration in previous document version if any.  Should be set to
+  `none` as soon as reuse can be ruled out.
+  -/
+  old? : Option (SnapshotTask α)
+  /--
+  Promise of snapshot value for the current document. When resolved, the language server will
+  report its result even before the current elaborator invocation has finished.
+  -/
+  new  : IO.Promise α
 
 /--
   Tree of snapshots where each snapshot comes with an array of asynchronous further subtrees. Used
@@ -154,7 +171,7 @@ def SnapshotBundle.filterOld (bundle : SnapshotBundle α) (f : SnapshotTask α �
 inductive SnapshotTree where
   /-- Creates a snapshot tree node. -/
   | mk (element : Snapshot) (children : Array (SnapshotTask SnapshotTree))
-deriving Nonempty
+deriving Inhabited
 
 /-- The immediately available element of the snapshot tree node. -/
 abbrev SnapshotTree.element : SnapshotTree → Snapshot
@@ -171,6 +188,10 @@ class ToSnapshotTree (α : Type) where
   toSnapshotTree : α → SnapshotTree
 export ToSnapshotTree (toSnapshotTree)
 
+instance [ToSnapshotTree α] : ToSnapshotTree (Option α) where
+  toSnapshotTree
+    | some a => toSnapshotTree a
+    | none   => default
 /--
   Option for printing end position of each message in addition to start position. Used for testing
   message ranges in the test suite. -/

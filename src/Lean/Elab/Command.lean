@@ -37,14 +37,8 @@ structure State where
 section Snapshots
 open Language
 
-structure CommandFinishedSnapshot extends Language.Snapshot where
-  /-- Resulting elaboration state. -/
-  cmdState : State
-deriving Nonempty
-instance : Language.ToSnapshotTree CommandFinishedSnapshot where
-  toSnapshotTree s := ⟨s.toSnapshot, #[]⟩
-
-structure DefViewElabHeaderCore where
+/-- Header elaboration data of a `DefView`. -/
+structure DefViewElabHeaderData where
   /--
     Short name. Recall that all declarations in Lean 4 are potentially recursive. We use `shortDeclName` to refer
     to them at `valueStx`, and other declarations in the same mutual block. -/
@@ -61,27 +55,52 @@ structure DefViewElabHeaderCore where
   type          : Expr
 deriving Inhabited
 
-structure SignatureProcessedSnapshot extends Language.Snapshot where
-  view : DefViewElabHeaderCore
-  state : Term.SavedState
-  tac : Language.SnapshotTask Elab.Tactic.TacticEvaluatedSnapshot
-deriving Nonempty
-instance : Language.ToSnapshotTree SignatureProcessedSnapshot where
-  toSnapshotTree s := ⟨s.toSnapshot, #[s.tac.map (sync := true) toSnapshotTree]⟩
-
 /--
-  State after processing a command's signature and before executing its tactic body, if any. Other
-  commands should immediately proceed to `finished`. -/
-structure SignatureParsed where
-  sigSubstr? : Option Substring
-  processed : SnapshotTask SignatureProcessedSnapshot
+Snapshot after processing of a definition body.
+
+Used for reporting progress only at the moment.
+ -/
+structure BodyProcessedSnapshot extends Language.Snapshot where
+deriving Nonempty
+instance : Language.ToSnapshotTree BodyProcessedSnapshot where
+  toSnapshotTree s := ⟨s.toSnapshot, #[]⟩
+
+/-- Snapshot after elaboration of a definition header. -/
+structure HeaderProcessedSnapshot extends Language.Snapshot where
+  /-- Elaboration results. -/
+  view : DefViewElabHeaderData
+  /-- Resulting elaboration state, including any environment additions. -/
+  state : Term.SavedState
+  /-- Incremental execution of main tactic block, if any. -/
+  tac? : Option (Language.SnapshotTask Elab.Tactic.TacticEvaluatedSnapshot)
+  /-- Result of body elaboration. -/
+  body : Language.SnapshotTask BodyProcessedSnapshot
+deriving Nonempty
+instance : Language.ToSnapshotTree HeaderProcessedSnapshot where
+  toSnapshotTree s := ⟨s.toSnapshot,
+    (match s.tac? with
+      | some tac => #[tac.map (sync := true) toSnapshotTree]
+      | none     => #[]) ++
+    #[s.body.map (sync := true) toSnapshotTree]⟩
+
+/-- State before elaboration of a definition header. -/
+structure HeaderParsed where
+  /--
+  Input substring uniquely identifying header elaboration result given the same `Environment`.
+  If missing, results should never be reused.
+  -/
+  headerSubstr? : Option Substring
+  /-- Elaboration result, unless fatal exception occurred. -/
+  processed : SnapshotTask (Option HeaderProcessedSnapshot)
 deriving Nonempty
 
-structure SignaturesParsedSnapshot extends Language.Snapshot where
-  sigs : Array SignatureParsed
+/-- Snapshot after syntax tree has been split into separate mutual def headers. -/
+structure HeadersParsedSnapshot extends Language.Snapshot where
+  /-- Definition headers of this mutual block. -/
+  headers : Array HeaderParsed
 deriving Nonempty
-instance : Language.ToSnapshotTree SignaturesParsedSnapshot where
-  toSnapshotTree s := ⟨s.toSnapshot, s.sigs.map (·.processed.map (sync := true) toSnapshotTree)⟩
+instance : Language.ToSnapshotTree HeadersParsedSnapshot where
+  toSnapshotTree s := ⟨s.toSnapshot, s.headers.map (·.processed.map (sync := true) toSnapshotTree)⟩
 
 end Snapshots
 
@@ -94,7 +113,13 @@ structure Context where
   currMacroScope : MacroScope := firstFrontendMacroScope
   ref            : Syntax := Syntax.missing
   tacticCache?   : Option (IO.Ref Tactic.Cache)
-  snap?          : Option (Language.SnapshotBundle SignaturesParsedSnapshot)
+  /--
+  Snapshot for incremental reuse and reporting of (mutual) def elaboration.
+
+  Invariant: if the bundle's `old?` is set, the context and state at the beginning of current and
+  old elaboration are identical.
+  -/
+  snap?          : Option (Language.SnapshotBundle HeadersParsedSnapshot)
 
 abbrev CommandElabCoreM (ε) := ReaderT Context $ StateRefT State $ EIO ε
 abbrev CommandElabM := CommandElabCoreM Exception

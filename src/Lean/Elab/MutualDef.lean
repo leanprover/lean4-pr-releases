@@ -19,9 +19,14 @@ import Lean.Elab.DeclarationRange
 namespace Lean.Elab
 open Lean.Parser.Term
 
-/-- `DefView` after elaborating the header. -/
-structure DefViewElabHeader extends DefView, Command.DefViewElabHeaderCore where
-  tacSnap? : Option (Language.SnapshotBundle Tactic.TacticEvaluatedSnapshot)
+/-- `DefView` plus header elaboration data and snapshot. -/
+structure DefViewElabHeader extends DefView, Command.DefViewElabHeaderData where
+  /--
+  Snapshot for incremental processing of definition body.
+
+  Invariant: bundle's `old?` is currently always `none`.
+  -/
+  bodySnap? : Option (Language.SnapshotBundle Command.BodyProcessedSnapshot)
   deriving Inhabited
 
 namespace Term
@@ -116,22 +121,26 @@ private def elabHeaders (views : Array DefView) : TermElabM (Array DefViewElabHe
   withAutoBoundImplicitForbiddenPred (fun n => expandedDeclIds.any (·.shortName == n)) do
     let mut headers := #[]
     for view in views, ⟨shortDeclName, declName, levelNames⟩ in expandedDeclIds do
-      let mkNewSnap new := do
-                let rangeStx := match view.value with
-                  | `(Parser.Command.declVal| := $body $_suffix:suffix $[$_where]?) => body
-                  | _ => view.value
-                return { range? := rangeStx.getRange?, task := new.result }
+      let mkBodyTask (new : IO.Promise Command.BodyProcessedSnapshot) :
+          TermElabM (Language.SnapshotTask Command.BodyProcessedSnapshot) := do
+        let rangeStx := match view.value with
+          -- do not include `:=` in body range so as not to highlight a header line as well
+          | `(Parser.Command.declVal| := $body $_suffix:suffix $[$_where]?) => body
+          | _ => view.value
+        return { range? := rangeStx.getRange?, task := new.result }
       if let some snap := view.snap? then
-        if let some old := snap.old? then
-          let old := old.get
+        -- by the `DefView.snap?` invariant, safe to reuse results at this point, so let's wait
+        -- for them!
+        if let some old := snap.old?.bind (·.get) then
           old.state.restore
+          -- definitely resolved in `finally` of `elabFunValues` (???)
           let new ← IO.Promise.new
-          snap.new.resolve { old with
-            tac := (← mkNewSnap new)
+          snap.new.resolve <| some { old with
+            body := (← mkBodyTask new)
           }
           headers := headers.push { old.view, view with
-            tacSnap? := some {
-              old? := old.tac
+            bodySnap? := some {
+              old? := old.body
               new
             }
           }
@@ -167,21 +176,22 @@ private def elabHeaders (views : Array DefView) : TermElabM (Array DefViewElabHe
               let pendingMVarIds ← getMVars type
               discard <| logUnassignedUsingErrorInfos pendingMVarIds <|
                 getPendindMVarErrorMessage views
-            let newHeader : Command.DefViewElabHeaderCore := {
-              shortDeclName := shortDeclName
-              declName, type, levelNames, binderIds
-              numParams     := xs.size
+            let newHeader : Command.DefViewElabHeaderData := {
+              declName, shortDeclName, type, levelNames, binderIds
+              numParams := xs.size
             }
             let newHeader := { view, newHeader with
-              tacSnap?      := (← view.snap?.mapM fun snap => do
+              bodySnap? := (← view.snap?.mapM fun snap => do
+                -- definitely resolved in `finally` of `elabFunValues` (???)
                 let new ← IO.Promise.new
-                snap.new.resolve {
+                snap.new.resolve <| some {
                   diagnostics := {
                     id? := none -- TODO
                     msgLog := (← Core.getResetMessageLog) }
                   view := newHeader
                   state := (← saveState)
-                  tac := (← mkNewSnap new)
+                  tac? := none
+                  body := (← mkBodyTask new)
                 }
                 return { old? := none, new })
             }
@@ -270,10 +280,12 @@ private def elabFunValues (headers : Array DefViewElabHeader) : TermElabM (Array
       for i in [0:header.binderIds.size] do
         -- skip auto-bound prefix in `xs`
         addLocalVarInfo header.binderIds[i]! xs[header.numParams - header.binderIds.size + i]!
-      let val ← try elabTermEnsuringType valStx type finally
-        -- TEMP
-        if let some snap := header.tacSnap? then
-          snap.new.resolve <| .mk { diagnostics := .empty, stx := .missing } #[]
+      let val ←
+        try
+          elabTermEnsuringType valStx type
+        finally
+          if let some snap := header.bodySnap? then
+            snap.new.resolve { diagnostics := { id? := none, msgLog := (← Core.getResetMessageLog) } }
       mkLambdaFVars xs val
 
 private def collectUsed (headers : Array DefViewElabHeader) (values : Array Expr) (toLift : List LetRecToLift)
@@ -854,34 +866,46 @@ def elabMutualDef (ds : Array Syntax) : CommandElabM Unit := do
   let substr? := (mkNullNode ds).getSubstring?
   let snap? := (← read).snap?
   let mut views := #[]
-  let mut sigSnaps := #[]
-  for h : i in [0:ds.size] do
-    let d := ds[i]
-    let modifiers ← elabModifiers d[0]
-    if ds.size > 1 && modifiers.isNonrec then
-      throwErrorAt d "invalid use of 'nonrec' modifier in 'mutual' block"
-    let mut view ← mkDefView modifiers d[1]
+  let mut headerSnaps := #[]
+  try
+    for h : i in [0:ds.size] do
+      let d := ds[i]
+      let modifiers ← elabModifiers d[0]
+      if ds.size > 1 && modifiers.isNonrec then
+        throwErrorAt d "invalid use of 'nonrec' modifier in 'mutual' block"
+      let mut view ← mkDefView modifiers d[1]
+      if let some snap := snap? then
+        -- definitely resolved in `finally` below
+        let new ← IO.Promise.new
+        let headerSubstr? := return { (← substr?) with stopPos := (← view.value.getPos?) }
+        view := { view with snap? := some {
+          old? := do
+            -- transitioning from `Context.snap?` to `DefView.snap?` invariant: if the elaboration
+            -- context and state are unchanged, and the substring from the beginngin of the first
+            -- header to the end of the current body is unchanged, then the elaboration result for
+            -- this header (which includes state from elaboration of previous headers!) should be
+            -- unchanged.
+            let old ← snap.old?
+            -- blocking wait, `HeadersParsedSnapshot` should be quick
+            let oldParsed ← old.get.headers[i]?
+            guard <| (← headerSubstr?).sameAs (← oldParsed.headerSubstr?)
+            oldParsed.processed
+          new
+        } }
+        headerSnaps := headerSnaps.push {
+          headerSubstr?
+          processed := { range? := d.getRange?, task := new.result }
+        }
+      views := views.push view
     if let some snap := snap? then
-      let new ← IO.Promise.new
-      let sigSubstr? := return { (← substr?) with stopPos := (← view.value.getPos?) }
-      view := { view with snap? := some {
-        old? := do
-          let old ← snap.old?
-          let oldSig ← old.get.sigs[i]?
-          let sigSubstr ← sigSubstr?
-          guard <| oldSig.sigSubstr?.any (·.sameAs sigSubstr)
-          oldSig.processed
-        new
-      } }
-      sigSnaps := sigSnaps.push {
-        sigSubstr?
-        processed := { range? := d.getRange?, task := new.result }
-      }
-    views := views.push view
-  if let some snap := snap? then
-    -- no non-fatal diagnostics at this point
-    snap.new.resolve { sigs := sigSnaps, diagnostics := .empty }
-  runTermElabM fun vars => Term.elabMutualDef vars views
+      -- no non-fatal diagnostics at this point
+      snap.new.resolve { headers := headerSnaps, diagnostics := .empty }
+    runTermElabM fun vars => Term.elabMutualDef vars views
+  finally
+    for view in views do
+      if let some snap := view.snap? then
+        -- only has an effect if actual `resolve` was skipped from fatal exception
+        snap.new.resolve none
 
 end Command
 end Lean.Elab
