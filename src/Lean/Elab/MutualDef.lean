@@ -120,6 +120,7 @@ private def elabHeaders (views : Array DefView) : TermElabM (Array DefViewElabHe
     Term.expandDeclId (← getCurrNamespace) (← getLevelNames) view.declId view.modifiers
   withAutoBoundImplicitForbiddenPred (fun n => expandedDeclIds.any (·.shortName == n)) do
     let mut headers := #[]
+    let mut reuseBody := views.all (·.snap?.any (·.old?.isSome))
     for view in views, ⟨shortDeclName, declName, levelNames⟩ in expandedDeclIds do
       let mkBodyTask (new : IO.Promise Command.BodyProcessedSnapshot) :
           TermElabM (Language.SnapshotTask Command.BodyProcessedSnapshot) := do
@@ -138,14 +139,16 @@ private def elabHeaders (views : Array DefView) : TermElabM (Array DefViewElabHe
           snap.new.resolve <| some { old with
             body := (← mkBodyTask new)
           }
+          reuseBody := reuseBody && view.value.structRangeEq old.bodyStx
           headers := headers.push { old.view, view with
             bodySnap? := some {
-              old? := old.body
+              old? := guard reuseBody *> old.body
               new
             }
           }
           continue
 
+      reuseBody := false
       let newHeader ← withRef view.ref do
         addDeclarationRanges declName view.ref
         applyAttributesAt declName view.modifiers.attrs .beforeElaboration
@@ -190,6 +193,7 @@ private def elabHeaders (views : Array DefView) : TermElabM (Array DefViewElabHe
                   view := newHeader
                   state := (← saveState)
                   tac? := none
+                  bodyStx := view.value
                   body := (← mkBodyTask new)
                 }
                 return { old? := none, new })
@@ -272,7 +276,14 @@ private def declValToTerminationHint (declVal : Syntax) : TermElabM WF.Terminati
     return .none
 
 private def elabFunValues (headers : Array DefViewElabHeader) : TermElabM (Array Expr) :=
-  headers.mapM fun header => withDeclName header.declName <| withLevelNames header.levelNames do
+  headers.mapM fun header => do
+    if let some snap := header.bodySnap? then
+      if let some old := snap.old? then
+        let old := old.get
+        old.state.restore
+        snap.new.resolve old
+
+    withDeclName header.declName <| withLevelNames header.levelNames do
     let valStx ← liftMacroM <| declValToTerm header.value
     forallBoundedTelescope header.type header.numParams fun xs type => do
       -- Add new info nodes for new fvars. The server will detect all fvars of a binder by the binder's source location.
@@ -280,10 +291,15 @@ private def elabFunValues (headers : Array DefViewElabHeader) : TermElabM (Array
         -- skip auto-bound prefix in `xs`
         addLocalVarInfo header.binderIds[i]! xs[header.numParams - header.binderIds.size + i]!
       let val ← elabTermEnsuringType valStx type
+      let val ← mkLambdaFVars xs val
       if let some snap := header.bodySnap? then
-        snap.new.resolve { diagnostics :=
-          (← Language.Snapshot.Diagnostics.ofMessageLog (← Core.getResetMessageLog)) }
-      mkLambdaFVars xs val
+        snap.new.resolve {
+          diagnostics :=
+            (← Language.Snapshot.Diagnostics.ofMessageLog (← Core.getResetMessageLog))
+          state := (← saveState)
+          value := val
+        }
+      return val
 
 private def collectUsed (headers : Array DefViewElabHeader) (values : Array Expr) (toLift : List LetRecToLift)
     : StateRefT CollectFVars.State MetaM Unit := do

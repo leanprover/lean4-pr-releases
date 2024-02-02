@@ -61,6 +61,8 @@ Snapshot after processing of a definition body.
 Used for reporting progress only at the moment.
  -/
 structure BodyProcessedSnapshot extends Language.Snapshot where
+  state : Term.SavedState
+  value : Expr
 deriving Nonempty
 instance : Language.ToSnapshotTree BodyProcessedSnapshot where
   toSnapshotTree s := ⟨s.toSnapshot, #[]⟩
@@ -73,6 +75,8 @@ structure HeaderProcessedSnapshot extends Language.Snapshot where
   state : Term.SavedState
   /-- Incremental execution of main tactic block, if any. -/
   tac? : Option (Language.SnapshotTask Elab.Tactic.TacticEvaluatedSnapshot)
+  /-- Syntax of definition body, for checking reuse of `body`. -/
+  bodyStx : Syntax
   /-- Result of body elaboration. -/
   body : Language.SnapshotTask BodyProcessedSnapshot
 deriving Nonempty
