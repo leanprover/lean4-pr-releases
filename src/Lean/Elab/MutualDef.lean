@@ -279,13 +279,10 @@ private def elabFunValues (headers : Array DefViewElabHeader) : TermElabM (Array
       for i in [0:header.binderIds.size] do
         -- skip auto-bound prefix in `xs`
         addLocalVarInfo header.binderIds[i]! xs[header.numParams - header.binderIds.size + i]!
-      let val ←
-        try
-          elabTermEnsuringType valStx type
-        finally
-          if let some snap := header.bodySnap? then
-            snap.new.resolve { diagnostics :=
-              (← Language.Snapshot.Diagnostics.ofMessageLog (← Core.getResetMessageLog)) }
+      let val ← elabTermEnsuringType valStx type
+      if let some snap := header.bodySnap? then
+        snap.new.resolve { diagnostics :=
+          (← Language.Snapshot.Diagnostics.ofMessageLog (← Core.getResetMessageLog)) }
       mkLambdaFVars xs val
 
 private def collectUsed (headers : Array DefViewElabHeader) (values : Array Expr) (toLift : List LetRecToLift)
