@@ -98,7 +98,7 @@ structure CommandParsedSnapshotData extends Snapshot where
   /-- Resulting parser state. -/
   parserState : Parser.ModuleParserState
   /-- Signature processing task. -/
-  sigs : SnapshotTask HeadersParsedSnapshot
+  headers : SnapshotTask HeadersParsedSnapshot
   /-- State after processing is finished. -/
   finished : SnapshotTask CommandFinishedSnapshot
 deriving Nonempty
@@ -113,14 +113,13 @@ deriving Nonempty
 abbrev CommandParsedSnapshot.data : CommandParsedSnapshot → CommandParsedSnapshotData
   | mk data _ => data
 /-- Next command, unless this is a terminal command. -/
--- It would be really nice to not make this depend on `sig.finished` where possible
 abbrev CommandParsedSnapshot.next? : CommandParsedSnapshot →
     Option (SnapshotTask CommandParsedSnapshot)
   | mk _ next? => next?
 partial instance : ToSnapshotTree CommandParsedSnapshot where
   toSnapshotTree := go where
     go s := ⟨s.data.toSnapshot,
-      #[s.data.sigs.map (sync := true) toSnapshotTree,
+      #[s.data.headers.map (sync := true) toSnapshotTree,
         s.data.finished.map (sync := true) toSnapshotTree] |>
         pushOpt (s.next?.map (·.map (sync := true) go))⟩
 
@@ -394,7 +393,7 @@ where
       -- is not `Inhabited`
       return .pure <| .mk (next? := none) {
         diagnostics := .empty, stx := .missing, parserState
-        sigs := .pure { diagnostics := .empty, headers := #[] }
+        headers := .pure { diagnostics := .empty, headers := #[] }
         finished := .pure { diagnostics := .empty, cmdState }
       }
 
@@ -432,10 +431,11 @@ where
         -- on first change, make sure to cancel all further old tasks
         old.cancel
 
-      let sigs ← IO.Promise.new
+      -- definitely assigned in `doElab` task
+      let headers ← IO.Promise.new
       let finished ←
         doElab stx cmdState msgLog.hasErrors beginPos
-          { old? := old?.map (·.data.sigs), new := sigs } ctx
+          { old? := old?.map (·.data.headers), new := headers } ctx
 
       let next? ← if Parser.isTerminalCommand stx then pure none
         -- for now, wait on "command finished" snapshot before parsing next command
@@ -445,7 +445,7 @@ where
         diagnostics := (← Snapshot.Diagnostics.ofMessageLog msgLog)
         stx
         parserState
-        sigs := { range? := none, task := sigs.result }
+        headers := { range? := none, task := headers.result }
         finished
       }
 
@@ -486,6 +486,8 @@ where
           data     := output
         }
       let cmdState := { cmdState with messages }
+      -- only has an effect if actual `resolve` was skipped from fatal exception (caught by
+      -- `catchExceptions` above)
       snap.new.resolve { headers := #[], diagnostics := .empty }
       return {
         diagnostics := (← Snapshot.Diagnostics.ofMessageLog cmdState.messages)
