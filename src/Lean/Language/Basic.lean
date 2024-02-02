@@ -41,6 +41,11 @@ end Lean.Server.FileWorker
 
 namespace Lean.Language
 
+/-- Unique diagnostics ID type of `Snapshot.Diagnostics.id?`. -/
+structure Snapshot.Diagnostics.ID where
+  private id : Nat
+deriving Nonempty, BEq, Ord
+
 /-- `MessageLog` with caching of interactive diagnostics. -/
 structure Snapshot.Diagnostics where
   /-- Non-interactive message log. -/
@@ -49,14 +54,31 @@ structure Snapshot.Diagnostics where
   Unique ID used by the file worker for caching diagnostics per message log. If `none`, no caching
   is done, which should only be used for messages not containing any interactive elements.
   -/
-  id? : Option Nat
+  id? : Option Diagnostics.ID
 deriving Inhabited
+
+/-- Next ID to be used for `Snapshot.Diagnostics.id?`. -/
+-- As the `Nat` value is not observable outside of this  module, using a global ref should be
+-- justified and simplifies reporting diagnostics from inside the elaborator
+private builtin_initialize nextDiagsIdRef : IO.Ref Nat ← IO.mkRef 0
+
+/-- Returns a new, unique diagnostics ID. -/
+def Snapshot.Diagnostics.ID.new : BaseIO ID :=
+  nextDiagsIdRef.modifyGet fun id => (⟨id⟩, id + 1)
 
 /-- The empty set of diagnostics. -/
 def Snapshot.Diagnostics.empty : Snapshot.Diagnostics where
   msgLog := .empty
   -- nothing to cache
   id? := none
+
+/--
+Creates snapshot message log from non-interactive message log, caching derived interactive
+diagnostics.
+-/
+def Snapshot.Diagnostics.ofMessageLog (msgLog : MessageLog) : BaseIO Snapshot.Diagnostics := do
+  let id ← ID.new
+  return { msgLog, id? := some id }
 
 /--
   The base class of all snapshots: all the generic information the language server needs about a
@@ -227,8 +249,6 @@ structure ModuleProcessingContext where
   opts : Options
   /-- Kernel trust level. -/
   trustLevel : UInt32 := 0
-  /-- Next ID to be used for `Snapshot.Diagnostics.id?`. -/
-  nextDiagsIdRef : IO.Ref Nat
   /--
     Callback available in server mode for building imports and retrieving per-library options using
     `lake setup-file`. -/
@@ -239,15 +259,6 @@ structure ProcessingContext extends ModuleProcessingContext, Parser.InputContext
 
 /-- Monad holding all relevant data for processing. -/
 abbrev ProcessingM := ReaderT ProcessingContext BaseIO
-
-/--
-Creates snapshot message log from non-interactive message log, caching derived interactive
-diagnostics.
--/
-def Snapshot.Diagnostics.ofMessageLog (msgLog : Lean.MessageLog) :
-    ProcessingM Snapshot.Diagnostics := do
-  let id ← (← read).nextDiagsIdRef.modifyGet fun id => (id, id + 1)
-  return { msgLog, id? := some id }
 
 end Language
 open Language

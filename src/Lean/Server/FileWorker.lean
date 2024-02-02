@@ -208,10 +208,9 @@ section Initialization
         mainModuleName ← moduleNameOfFileName path none
     catch _ => pure ()
     let maxDocVersionRef ← IO.mkRef 0
-    let nextDiagsIdRef ← IO.mkRef 0
     let chanOut ← mkLspOutputChannel maxDocVersionRef
     let processor ← Language.Lean.mkIncrementalProcessor {
-      opts, mainModuleName, nextDiagsIdRef
+      opts, mainModuleName
       fileSetupHandler? := some fun imports => do
         let result ← setupFile meta imports fun stderrLine => do
           let progressDiagnostic := {

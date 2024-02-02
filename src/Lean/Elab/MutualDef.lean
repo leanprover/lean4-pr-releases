@@ -185,9 +185,8 @@ private def elabHeaders (views : Array DefView) : TermElabM (Array DefViewElabHe
                 -- definitely resolved in `finally` of `elabFunValues` (???)
                 let new ← IO.Promise.new
                 snap.new.resolve <| some {
-                  diagnostics := {
-                    id? := none -- TODO
-                    msgLog := (← Core.getResetMessageLog) }
+                  diagnostics :=
+                    (← Language.Snapshot.Diagnostics.ofMessageLog (← Core.getResetMessageLog))
                   view := newHeader
                   state := (← saveState)
                   tac? := none
@@ -285,7 +284,8 @@ private def elabFunValues (headers : Array DefViewElabHeader) : TermElabM (Array
           elabTermEnsuringType valStx type
         finally
           if let some snap := header.bodySnap? then
-            snap.new.resolve { diagnostics := { id? := none, msgLog := (← Core.getResetMessageLog) } }
+            snap.new.resolve { diagnostics :=
+              (← Language.Snapshot.Diagnostics.ofMessageLog (← Core.getResetMessageLog)) }
       mkLambdaFVars xs val
 
 private def collectUsed (headers : Array DefViewElabHeader) (values : Array Expr) (toLift : List LetRecToLift)

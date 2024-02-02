@@ -65,7 +65,8 @@ where
         | none => .nil)
 
 /-- A map from Diagnostics ID to resulting interactive objects. -/
-abbrev DiagnosticsCache := RBMap Nat (Array Widget.InteractiveDiagnostic) compare
+abbrev DiagnosticsCache :=
+  RBMap Language.Snapshot.Diagnostics.ID (Array Widget.InteractiveDiagnostic) compare
 
 /--
 A document bundled with processing information. Turned into `EditableDocument` as soon as the

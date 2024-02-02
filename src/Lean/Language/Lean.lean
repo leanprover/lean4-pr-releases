@@ -442,7 +442,7 @@ where
         else some <$> finished.bindIO fun finished =>
           parseCmd none parserState finished.cmdState ctx
       return .mk (next? := next?) {
-        diagnostics := (← Snapshot.Diagnostics.ofMessageLog msgLog ctx.toProcessingContext)
+        diagnostics := (← Snapshot.Diagnostics.ofMessageLog msgLog)
         stx
         parserState
         sigs := { range? := none, task := sigs.result }
@@ -488,8 +488,7 @@ where
       let cmdState := { cmdState with messages }
       snap.new.resolve { headers := #[], diagnostics := .empty }
       return {
-        diagnostics :=
-          (← Snapshot.Diagnostics.ofMessageLog cmdState.messages ctx.toProcessingContext)
+        diagnostics := (← Snapshot.Diagnostics.ofMessageLog cmdState.messages)
         infoTree? := some cmdState.infoState.trees[0]!
         cmdState
       }
