@@ -97,7 +97,7 @@ structure CommandParsedSnapshotData extends Snapshot where
   stx : Syntax
   /-- Resulting parser state. -/
   parserState : Parser.ModuleParserState
-  /-- Signature processing task. -/
+  /-- Definition headers processing task. -/
   headers : SnapshotTask HeadersParsedSnapshot
   /-- State after processing is finished. -/
   finished : SnapshotTask CommandFinishedSnapshot
@@ -487,7 +487,7 @@ where
         }
       let cmdState := { cmdState with messages }
       -- only has an effect if actual `resolve` was skipped from fatal exception (caught by
-      -- `catchExceptions` above)
+      -- `catchExceptions` above) or it not being a mutual def
       snap.new.resolve { headers := #[], diagnostics := .empty }
       return {
         diagnostics := (← Snapshot.Diagnostics.ofMessageLog cmdState.messages)

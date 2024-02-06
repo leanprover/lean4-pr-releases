@@ -24,7 +24,8 @@ structure DefViewElabHeader extends DefView, Command.DefViewElabHeaderData where
   /--
   Snapshot for incremental processing of definition body.
 
-  Invariant: bundle's `old?` is currently always `none`.
+  Invariant: if the bundle's `old?` is set, then elaboration of the body is guaranteed to result in
+  the same elaboration result and state, i.e. reuse is possible.
   -/
   bodySnap? : Option (Language.SnapshotBundle Command.BodyProcessedSnapshot)
   deriving Inhabited
@@ -120,6 +121,8 @@ private def elabHeaders (views : Array DefView) : TermElabM (Array DefViewElabHe
     Term.expandDeclId (← getCurrNamespace) (← getLevelNames) view.declId view.modifiers
   withAutoBoundImplicitForbiddenPred (fun n => expandedDeclIds.any (·.shortName == n)) do
     let mut headers := #[]
+    -- Can we reuse the result for a body? For starters, all headers (even those below the body)
+    -- must be reusable
     let mut reuseBody := views.all (·.snap?.any (·.old?.isSome))
     for view in views, ⟨shortDeclName, declName, levelNames⟩ in expandedDeclIds do
       let mkBodyTask (new : IO.Promise Command.BodyProcessedSnapshot) :
@@ -139,6 +142,9 @@ private def elabHeaders (views : Array DefView) : TermElabM (Array DefViewElabHe
           snap.new.resolve <| some { old with
             body := (← mkBodyTask new)
           }
+          -- Transition from `DefView.snap?` to `DefViewElabHeader.bodySnap?` invariant: if all
+          -- headers and all previous bodies could be reused and this body syntax is unchanged, then
+          -- we can reuse the result
           reuseBody := reuseBody && view.value.structRangeEq old.bodyStx
           headers := headers.push { old.view, view with
             bodySnap? := some {
@@ -147,8 +153,9 @@ private def elabHeaders (views : Array DefView) : TermElabM (Array DefViewElabHe
             }
           }
           continue
+        else
+          reuseBody := false
 
-      reuseBody := false
       let newHeader ← withRef view.ref do
         addDeclarationRanges declName view.ref
         applyAttributesAt declName view.modifiers.attrs .beforeElaboration
@@ -196,6 +203,7 @@ private def elabHeaders (views : Array DefView) : TermElabM (Array DefViewElabHe
                   bodyStx := view.value
                   body := (← mkBodyTask new)
                 }
+                -- if header can't be reused, neither can body
                 return { old? := none, new })
             }
             check headers newHeader
@@ -282,6 +290,7 @@ private def elabFunValues (headers : Array DefViewElabHeader) : TermElabM (Array
         let old := old.get
         old.state.restore
         snap.new.resolve old
+        return old.value
 
     withDeclName header.declName <| withLevelNames header.levelNames do
     let valStx ← liftMacroM <| declValToTerm header.value
@@ -890,12 +899,13 @@ def elabMutualDef (ds : Array Syntax) : CommandElabM Unit := do
       if let some snap := snap? then
         -- definitely resolved in `finally` below
         let new ← IO.Promise.new
+        -- overapproximation: includes previous bodies as well
         let headerSubstr? := return { (← substr?) with stopPos := (← view.value.getPos?) }
         view := { view with snap? := some {
           old? := do
             -- transitioning from `Context.snap?` to `DefView.snap?` invariant: if the elaboration
-            -- context and state are unchanged, and the substring from the beginngin of the first
-            -- header to the end of the current body is unchanged, then the elaboration result for
+            -- context and state are unchanged, and the substring from the beginning of the first
+            -- header to the beginning of the current body is unchanged, then the elaboration result for
             -- this header (which includes state from elaboration of previous headers!) should be
             -- unchanged.
             let old ← snap.old?

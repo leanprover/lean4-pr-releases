@@ -55,13 +55,11 @@ structure DefViewElabHeaderData where
   type          : Expr
 deriving Inhabited
 
-/--
-Snapshot after processing of a definition body.
-
-Used for reporting progress only at the moment.
- -/
+/-- Snapshot after processing of a definition body.  -/
 structure BodyProcessedSnapshot extends Language.Snapshot where
+  /-- State after elaboration. -/
   state : Term.SavedState
+  /-- Elaboration result. -/
   value : Expr
 deriving Nonempty
 instance : Language.ToSnapshotTree BodyProcessedSnapshot where
