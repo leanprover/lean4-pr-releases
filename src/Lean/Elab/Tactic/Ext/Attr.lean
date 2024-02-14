@@ -23,7 +23,10 @@ structure ExtTheorem where
   declName : Name
   /-- Priority of the extensionality theorem. -/
   priority : Nat
-  /-- Key in the discrimination tree. -/
+  /--
+  Key in the discrimination tree,
+  for the type in which the extensionality theorem holds.
+  -/
   keys : Array DiscrTree.Key
   deriving Inhabited, Repr, BEq, Hashable
 

@@ -6,6 +6,7 @@ Authors: Gabriel Ebner, Mario Carneiro
 import Lean.Elab.Tactic.RCases
 import Lean.Elab.Tactic.Repeat
 import Lean.Elab.Tactic.Ext.Attr
+import Lean.Elab.Tactic.BuiltinTactic
 import Lean.Linter.Util
 
 namespace Lean.Elab.Tactic.Ext
@@ -93,7 +94,7 @@ macro_rules | `(declare_ext_theorems_for $[(flat := $f)]? $struct:ident $(prio)?
       fun {..} {..} => by intros; subst_eqs; rfl
     protected theorem $extIffName:ident : ext_iff_type% $flat $struct:ident :=
       fun {..} {..} =>
-        ⟨fun h => by cases h; split_ands <;> rfl,
+        ⟨fun h => by cases h; and_intros <;> rfl,
          fun _ => by (repeat cases ‹_ ∧ _›); subst_eqs; rfl⟩)
 
 /-- Apply a single extensionality theorem to `goal`. -/
@@ -180,15 +181,12 @@ def extCore (g : MVarId) (pats : List (TSyntax `rcasesPat))
 Applies extensionality lemmas that are registered with the `@[ext]` attribute.
 * `ext pat*` applies extensionality theorems as much as possible,
   using the patterns `pat*` to introduce the variables in extensionality theorems using `rintro`.
-  For example, this names the variables introduced by theorems such as `funext`.
-* `ext` applies extensionality theorems as much as possible
-  but introduces anonymous variables whenever needed.
+  For example, the patterns are used to name the variables introduced by lemmas such as `funext`.
+* Without patterns,`ext` applies extensionality lemmas as much
+  as possible but introduces anonymous hypotheses whenever needed.
 * `ext pat* : n` applies ext theorems only up to depth `n`.
 
 The `ext1 pat*` tactic is like `ext pat*` except that it only applies a single extensionality theorem.
-
-The `ext?` tactic (note: unimplemented) has the same syntax as the `ext` tactic,
-and it gives a suggestion of an equivalent tactic to use in place of `ext`.
 -/
 syntax "ext" (colGt ppSpace rintroPat)* (" : " num)? : tactic
 elab_rules : tactic
@@ -212,12 +210,6 @@ If no patterns are supplied, then variables are introduced anonymously using the
 macro "ext1" xs:(colGt ppSpace rintroPat)* : tactic =>
   if xs.isEmpty then `(tactic| apply_ext_theorem <;> intros)
   else `(tactic| apply_ext_theorem <;> rintro $xs*)
-
--- TODO
-/-- `ext1? pat*` is like `ext1 pat*` but gives a suggestion on what pattern to use -/
-syntax "ext1?" (colGt ppSpace rintroPat)* : tactic
-/-- `ext? pat*` is like `ext pat*` but gives a suggestion on what pattern to use -/
-syntax "ext?" (colGt ppSpace rintroPat)* (" : " num)? : tactic
 
 end Lean.Elab.Tactic.Ext
 
