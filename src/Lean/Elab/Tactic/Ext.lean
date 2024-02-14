@@ -152,7 +152,7 @@ def withExt1 [Monad m] [MonadLiftT TermElabM m] (g : MVarId) (pats : List (TSynt
   pure n
 
 /--
-Applies a extensionality theorems recursively, using `pats` to introduce variables in the result.
+Applies extensionality theorems recursively, using `pats` to introduce variables in the result.
 Runs continuation `k` on each subgoal.
 -/
 def withExtN [Monad m] [MonadLiftT TermElabM m] [MonadExcept Exception m]
