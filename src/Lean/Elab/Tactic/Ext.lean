@@ -170,6 +170,9 @@ def withExtN [Monad m] [MonadLiftT TermElabM m] [MonadExcept Exception m]
 /--
 Apply extensionality theorems as much as possible, using `pats` to introduce the variables
 in extensionality theorems like `funext`. Returns a list of subgoals.
+
+This is built on top of `withExtN`, running in `TermElabM` to build the list of new subgoals.
+(And, for each goal, the patterns consumed.)
 -/
 def extCore (g : MVarId) (pats : List (TSyntax `rcasesPat))
     (depth := 1000000) (failIfUnchanged := true) :
