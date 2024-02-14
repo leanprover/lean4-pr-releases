@@ -187,6 +187,9 @@ Applies extensionality lemmas that are registered with the `@[ext]` attribute.
 * `ext pat* : n` applies ext theorems only up to depth `n`.
 
 The `ext1 pat*` tactic is like `ext pat*` except that it only applies a single extensionality theorem.
+
+Unused patterns will generate warning.
+Patterns that don't match the variables will typically result in the introduction of anonymous hypotheses.
 -/
 syntax "ext" (colGt ppSpace rintroPat)* (" : " num)? : tactic
 elab_rules : tactic
