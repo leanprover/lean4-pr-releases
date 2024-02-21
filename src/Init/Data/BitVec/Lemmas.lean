@@ -26,6 +26,9 @@ theorem eq_of_toNat_eq {n} : ∀ {i j : BitVec n}, i.toNat = j.toNat → i = j
 theorem toNat_eq (x y : BitVec n) : x = y ↔ x.toNat = y.toNat :=
   Iff.intro (congrArg BitVec.toNat) eq_of_toNat_eq
 
+theorem toNat_ne (x y : BitVec n) : x ≠ y ↔ x.toNat ≠ y.toNat := by
+  rw [Ne, toNat_eq]
+
 theorem toNat_lt (x : BitVec n) : x.toNat < 2^n := x.toFin.2
 
 theorem testBit_toNat (x : BitVec w) : x.toNat.testBit i = x.getLsb i := rfl
@@ -532,3 +535,13 @@ protected theorem lt_of_le_ne (x y : BitVec n) (h1 : x <= y) (h2 : ¬ x = y) : x
   let ⟨y, lt⟩ := y
   simp
   exact Nat.lt_of_le_of_ne
+
+-- This should be a simp attribute, but we don't have builtin simp attributes.
+macro "bv_to_nat" : tactic =>
+  `(tactic| simp only [lt_def, le_def, toNat_eq, toNat_ne, toNat_ofFin,
+    toNat_add, toNat_mul, toNat_sub, toNat_neg, ofNat_eq_ofNat, toNat_ofNat,
+    toNat_shiftLeft, toNat_ushiftRight, toNat_zeroExtend', toNat_zeroExtend,
+    toNat_cast, toNat_truncate, toNat_not] at *)
+
+macro "bv_omega" : tactic =>
+  `(tactic| (try bv_to_nat) <;> omega)
