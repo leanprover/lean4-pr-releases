@@ -3,6 +3,7 @@ Copyright (c) 2020 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
+prelude
 import Lean.Parser.Term
 import Lean.Meta.Closure
 import Lean.Meta.Check
@@ -246,7 +247,7 @@ private def expandWhereStructInst : Macro
         `(structInstField|$id:ident := $val)
       | stx@`(letIdDecl|_ $_* $[: $_]? := $_) => Macro.throwErrorAt stx "'_' is not allowed here"
       | _ => Macro.throwUnsupported
-    let body ← `({ $structInstFields,* })
+    let body ← `(structInst| { $structInstFields,* })
     match whereDecls? with
     | some whereDecls => expandWhereDecls whereDecls body
     | none => return body
@@ -580,8 +581,8 @@ private partial def mkClosureForAux (toProcess : Array FVarId) : StateRefT Closu
       let toProcess ← pushLocalDecl toProcess fvarId userName type bi k
       mkClosureForAux toProcess
     | .ldecl _ _ userName type val _ k =>
-      let zetaFVarIds ← getZetaFVarIds
-      if !zetaFVarIds.contains fvarId then
+      let zetaDeltaFVarIds ← getZetaDeltaFVarIds
+      if !zetaDeltaFVarIds.contains fvarId then
         /- Non-dependent let-decl. See comment at src/Lean/Meta/Closure.lean -/
         let toProcess ← pushLocalDecl toProcess fvarId userName type .default k
         mkClosureForAux toProcess
@@ -691,7 +692,7 @@ def pushMain (preDefs : Array PreDefinition) (sectionVars : Array Expr) (mainHea
   mainHeaders.size.foldM (init := preDefs) fun i preDefs => do
     let header := mainHeaders[i]!
     let termination ← declValToTerminationHint header.value
-    let termination ← termination.checkVars header.numParams mainVals[i]!
+    let termination := termination.rememberExtraParams header.numParams mainVals[i]!
     let value ← mkLambdaFVars sectionVars mainVals[i]!
     let type ← mkForallFVars sectionVars header.type
     return preDefs.push {
@@ -745,8 +746,8 @@ def main (sectionVars : Array Expr) (mainHeaders : Array DefViewElabHeader) (mai
   let letRecsToLift := letRecsToLift.toArray
   let mainFVarIds := mainFVars.map Expr.fvarId!
   let recFVarIds  := (letRecsToLift.map fun toLift => toLift.fvarId) ++ mainFVarIds
-  resetZetaFVarIds
-  withTrackingZeta do
+  resetZetaDeltaFVarIds
+  withTrackingZetaDelta do
     -- By checking `toLift.type` and `toLift.val` we populate `zetaFVarIds`. See comments at `src/Lean/Meta/Closure.lean`.
     let letRecsToLift ← letRecsToLift.mapM fun toLift => withLCtx toLift.lctx toLift.localInstances do
       Meta.check toLift.type

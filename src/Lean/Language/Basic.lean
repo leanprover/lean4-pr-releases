@@ -51,10 +51,13 @@ structure Snapshot.Diagnostics where
   /-- Non-interactive message log. -/
   msgLog : MessageLog
   /--
-  Unique ID used by the file worker for caching diagnostics per message log. If `none`, no caching
-  is done, which should only be used for messages not containing any interactive elements.
+  Dynamic mutable slot usable by the language server for caching interactive diagnostics.  If
+  `none`, no caching is done, which should only be used for messages not containing any interactive
+  elements.
+
+  See also section "Communication" in Lean/Server/README.md.
   -/
-  id? : Option Diagnostics.ID
+  cacheRef? : Option (IO.Ref (Option Dynamic))
 deriving Inhabited
 
 /-- Next ID to be used for `Snapshot.Diagnostics.id?`. -/
@@ -70,15 +73,15 @@ def Snapshot.Diagnostics.ID.new : BaseIO ID :=
 def Snapshot.Diagnostics.empty : Snapshot.Diagnostics where
   msgLog := .empty
   -- nothing to cache
-  id? := none
+  cacheRef? := none
 
 /--
 Creates snapshot message log from non-interactive message log, caching derived interactive
 diagnostics.
 -/
-def Snapshot.Diagnostics.ofMessageLog (msgLog : MessageLog) : BaseIO Snapshot.Diagnostics := do
-  let id ← ID.new
-  return { msgLog, id? := some id }
+def Snapshot.Diagnostics.ofMessageLog (msgLog : Lean.MessageLog) :
+    BaseIO Snapshot.Diagnostics := do
+  return { msgLog, cacheRef? := some (← IO.mkRef none) }
 
 /--
   The base class of all snapshots: all the generic information the language server needs about a
@@ -249,46 +252,45 @@ structure ModuleProcessingContext where
   opts : Options
   /-- Kernel trust level. -/
   trustLevel : UInt32 := 0
-  /--
-    Callback available in server mode for building imports and retrieving per-library options using
-    `lake setup-file`. -/
-  fileSetupHandler? : Option (Array Import → IO Server.FileWorker.FileSetupResult)
 
 /-- Context of an input processing invocation. -/
 structure ProcessingContext extends ModuleProcessingContext, Parser.InputContext
 
+/-- Monad transformer holding all relevant data for processing. -/
+abbrev ProcessingT m := ReaderT ProcessingContext m
 /-- Monad holding all relevant data for processing. -/
-abbrev ProcessingM := ReaderT ProcessingContext BaseIO
+abbrev ProcessingM := ProcessingT BaseIO
+
+instance : MonadLift ProcessingM (ProcessingT IO) where
+  monadLift := fun act ctx => act ctx
+
+/-- Creates diagnostics from a single error message that should span the whole file. -/
+def diagnosticsOfHeaderError (msg : String) : ProcessingM Snapshot.Diagnostics := do
+  let msgLog := MessageLog.empty.add {
+    fileName := "<input>"
+    pos := ⟨0, 0⟩
+    endPos := (← read).fileMap.toPosition (← read).fileMap.source.endPos
+    data := msg
+  }
+  Snapshot.Diagnostics.ofMessageLog msgLog
+
+/--
+  Adds unexpected exceptions from header processing to the message log as a last resort; standard
+  errors should already have been caught earlier. -/
+def withHeaderExceptions (ex : Snapshot → α) (act : ProcessingT IO α) : ProcessingM α := do
+  match (← (act (← read)).toBaseIO) with
+  | .error e => return ex { diagnostics := (← diagnosticsOfHeaderError e.toString) }
+  | .ok a => return a
 
 end Language
-open Language
-
-/-- Definition of a language processor that can be driven by the cmdline or language server. -/
-structure Language where
-  /--
-    Type of snapshot returned by `process`. It can be converted to a graph of homogeneous snapshot
-    types via `ToSnapshotTree`.  -/
-  InitialSnapshot : Type
-  /-- Instance for transforming the initial snapshot into a snapshot tree for reporting. -/
-  [instToSnapshotTree : ToSnapshotTree InitialSnapshot]
-  /--
-    Processes input into snapshots, potentially reusing information from a previous run.
-    Constructing the initial snapshot is assumed to be cheap enough that it can be done
-    synchronously, which simplifies use of this function. -/
-  process (old? : Option InitialSnapshot) : ProcessingM InitialSnapshot
-  -- TODO: is this the right interface for other languages as well?
-  /-- Gets final environment, if any, that is to be used for persisting, code generation, etc. -/
-  getFinalEnv? : InitialSnapshot → Option Environment
-
-instance (lang : Language) : ToSnapshotTree lang.InitialSnapshot := lang.instToSnapshotTree
 
 /--
   Builds a function for processing a language using incremental snapshots by passing the previous
   snapshot to `Language.process` on subsequent invocations. -/
-partial def Language.mkIncrementalProcessor (lang : Language) (ctx : ModuleProcessingContext) :
-    BaseIO (Parser.InputContext → BaseIO lang.InitialSnapshot) := do
+partial def Language.mkIncrementalProcessor (process : Option InitSnap → ProcessingM InitSnap)
+    (ctx : ModuleProcessingContext) : BaseIO (Parser.InputContext → BaseIO InitSnap) := do
   let oldRef ← IO.mkRef none
   return fun ictx => do
-    let snap ← lang.process (← oldRef.get) { ctx, ictx with }
+    let snap ← process (← oldRef.get) { ctx, ictx with }
     oldRef.set (some snap)
     return snap

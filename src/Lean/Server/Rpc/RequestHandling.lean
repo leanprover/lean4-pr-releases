@@ -4,6 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 
 Authors: Wojciech Nawrocki
 -/
+prelude
 import Lean.Data.Lsp.Extra
 import Lean.Server.Requests
 
@@ -30,10 +31,6 @@ private unsafe def evalRpcProcedureUnsafe (env : Environment) (opts : Options) (
 @[implemented_by evalRpcProcedureUnsafe]
 opaque evalRpcProcedure (env : Environment) (opts : Options) (procName : Name) :
     Except String RpcProcedure
-
-def runRpcProcedure (p : RpcProcedure) :
-    (sessionId : UInt64) → Json → RequestM (RequestTask Json) :=
-  p.wrapper
 
 open RequestM in
 def handleRpcCall (p : Lsp.RpcCallParams) : RequestM (RequestTask Json) := do

@@ -4,6 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 
 Authors: Wojciech Nawrocki, Marc Huisinga
 -/
+prelude
 import Lean.Language.Lean
 import Lean.Server.Utils
 import Lean.Server.Snapshots
@@ -76,7 +77,6 @@ structure EditableDocumentCore where
   /-- The document. -/
   meta       : DocumentMeta
   /-- Initial processing snapshot. -/
-  -- TODO: generalize to other languages by moving request handlers into `Language`
   initSnap : Language.Lean.InitialSnapshot
   /-- Old representation for backward compatibility. -/
   cmdSnaps : AsyncList ElabTaskError Snapshot := mkCmdSnaps initSnap
@@ -85,11 +85,6 @@ structure EditableDocumentCore where
   `handleGetInteractiveDiagnosticsRequest`.
   -/
   diagnosticsRef : IO.Ref (Array Widget.InteractiveDiagnostic)
-  /--
-  Cache of interactive diagnostics reported so far, for reuse in future document versions. May be
-  a subset of `diagnosticsRef` if there any `Snapshot.Diagnostics.id?` are empty.
-  -/
-  diagnosticsCacheRef : IO.Ref DiagnosticsCache
 
 /-- `EditableDocumentCore` with reporter task. -/
 structure EditableDocument extends EditableDocumentCore where
