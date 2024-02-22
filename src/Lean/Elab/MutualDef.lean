@@ -145,6 +145,7 @@ private def elabHeaders (views : Array DefView) (headersRef : IO.Ref (Array DefV
           -- definitely resolved in `finally` of `elabMutualDef`
           let new ← IO.Promise.new
           snap.new.resolve <| some { old with
+            bodyStx := view.value
             body := (← mkBodyTask new)
           }
           -- Transition from `DefView.snap?` to `DefViewElabHeader.bodySnap?` invariant: if all
