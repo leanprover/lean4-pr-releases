@@ -78,7 +78,7 @@ structure HeaderProcessedSnapshot extends Language.Snapshot where
   /-- Syntax of definition body, for checking reuse of `body`. -/
   bodyStx : Syntax
   /-- Result of body elaboration. -/
-  body : Language.SnapshotTask BodyProcessedSnapshot
+  body : Language.SnapshotTask (Option BodyProcessedSnapshot)
 deriving Nonempty
 instance : Language.ToSnapshotTree HeaderProcessedSnapshot where
   toSnapshotTree s := ⟨s.toSnapshot,
@@ -119,6 +119,8 @@ structure Context where
   tacticCache?   : Option (IO.Ref Tactic.Cache)
   /--
   Snapshot for incremental reuse and reporting of (mutual) def elaboration.
+
+  Definitely resolved in `Language.Lean.process.doElab`.
 
   Invariant: if the bundle's `old?` is set, the context and state at the beginning of current and
   old elaboration are identical.

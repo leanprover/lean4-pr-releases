@@ -42,7 +42,7 @@ structure DefView where
   Invariant: If the bundle's `old?` is set, then elaboration of the header is guaranteed to result
   in the same elaboration result and state, i.e. reuse is possible.
   -/
-  snap?         : Option (Language.SnapshotBundle (Option Command.HeaderProcessedSnapshot)) := none
+  headerSnap?   : Option (Language.SnapshotBundle (Option Command.HeaderProcessedSnapshot)) := none
   deriving?     : Option (Array Syntax) := none
   deriving Inhabited
 
