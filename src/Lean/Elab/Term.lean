@@ -273,12 +273,16 @@ structure SavedState where
 protected def saveState : TermElabM SavedState :=
   return { meta := (← Meta.saveState), «elab» := (← get) }
 
-def SavedState.restore (s : SavedState) (restoreInfo : Bool := false) : TermElabM Unit := do
-  let traceState ← getTraceState -- We never backtrack trace message
-  let infoState ← getInfoState -- We also do not backtrack the info nodes when `restoreInfo == false`
+def SavedState.restore (s : SavedState) (restoreTrace restoreInfo : Bool := false) :
+    TermElabM Unit := do
+  -- by default, we do not restore these as we want them logged even for aborted branches of
+  -- elaboration
+  let traceState ← getTraceState
+  let infoState ← getInfoState
   s.meta.restore
   set s.elab
-  setTraceState traceState
+  unless restoreTrace do
+    setTraceState traceState
   unless restoreInfo do
     setInfoState infoState
 

@@ -141,7 +141,7 @@ private def elabHeaders (views : Array DefView) (headersRef : IO.Ref (Array DefV
         -- by the `DefView.snap?` invariant, safe to reuse results at this point, so let's wait
         -- for them!
         if let some old := snap.old?.bind (·.get) then
-          old.state.restore
+          old.state.restore (restoreTrace := true) (restoreInfo := true)
           -- definitely resolved in `finally` of `elabMutualDef`
           let new ← IO.Promise.new
           snap.new.resolve <| some { old with
@@ -293,7 +293,7 @@ private def elabFunValues (headers : Array DefViewElabHeader) : TermElabM (Array
     if let some snap := header.bodySnap? then
       if let some old := snap.old? then
         if let some old := old.get then
-          old.state.restore
+          old.state.restore (restoreTrace := true) (restoreInfo := true)
           snap.new.resolve <| some old
           return old.value
 
