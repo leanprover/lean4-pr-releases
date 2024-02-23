@@ -74,7 +74,7 @@ structure HeaderProcessedSnapshot extends Language.Snapshot where
   /-- Resulting elaboration state, including any environment additions. -/
   state : Term.SavedState
   /-- Incremental execution of main tactic block, if any. -/
-  tac? : Option (Language.SnapshotTask Elab.Tactic.TacticEvaluatedSnapshot)
+  tac? : Option (Language.SnapshotTask (Option Elab.Tactic.TacticEvaluatedSnapshot))
   /-- Syntax of definition body, for checking reuse of `body`. -/
   bodyStx : Syntax
   /-- Result of body elaboration. -/
