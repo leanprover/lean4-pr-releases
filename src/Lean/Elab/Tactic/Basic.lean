@@ -34,10 +34,6 @@ structure Context where
   -/
   recover    : Bool := true
 
-structure SavedState where
-  term   : Term.SavedState
-  tactic : State
-
 abbrev TacticM := ReaderT Context $ StateRefT State TermElabM
 abbrev Tactic  := Syntax → TacticM Unit
 
@@ -96,8 +92,8 @@ def run (mvarId : MVarId) (x : TacticM Unit) : TermElabM (List MVarId) :=
 protected def saveState : TacticM SavedState :=
   return { term := (← Term.saveState), tactic := (← get) }
 
-def SavedState.restore (b : SavedState) (restoreInfo := false) : TacticM Unit := do
-  b.term.restore restoreInfo
+def SavedState.restore (b : SavedState) (restoreTrace restoreInfo : Bool := false) : TacticM Unit := do
+  b.term.restore restoreTrace restoreInfo
   set b.tactic
 
 protected def getCurrMacroScope : TacticM MacroScope := do pure (← readThe Core.Context).currMacroScope

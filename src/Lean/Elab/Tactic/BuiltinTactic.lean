@@ -34,38 +34,49 @@ where
   goEven : _ → TacticM _
     | [] => return
     | tac :: stxs => do
-      if let some snap := (← readThe Term.Context).snap? then
-        let mut (old?, oldNext?) := match snap.old?.map (·.get) with
-          | some (.mk old oldNext) => (some old, oldNext.get? 0)
-          | none => (none, none)
-        let next ← IO.Promise.new
-        snap.new.resolve <| TacticEvaluatedSnapshot.mk {
-          stx := tac
-          diagnostics := .empty
-        } #[{
-          range? := mkNullNode (tac :: stxs).toArray |>.getRange?
-          task := next.result }]
-        if old?.any (·.stx == tac) then
-          pure ()
-        else
-          oldNext? := none
-          withTheReader Term.Context ({ · with snap? := none }) do
+      if let some snap := (← readThe Term.Context).tacSnap? then
+        let mut reused := false
+        let mut oldNext? := none
+        if let some old := snap.old? then
+          if tac.structRangeEq (old.stx.getArg 0) then
+            let oldEvaluated := old.val.get
+            if let some state := oldEvaluated.data.state? then
+              state.restore (restoreInfo := true) (restoreTrace := true)
+              reused := true
+              oldNext? := oldEvaluated.next.get? 0 |>.map (⟨mkNullNode old.stx.getArgs[1:], ·⟩)
+        unless reused do
+          withTheReader Term.Context ({ · with tacSnap? := none }) do
             evalTactic tac
-        withTheReader Term.Context ({ · with snap? := some {
-          new := next
-          old? := oldNext?
-        } }) do
-          goOdd stxs
+        -- definitely resolved below
+        let next ← IO.Promise.new
+        try
+          snap.new.resolve <| .mk {
+            stx := tac
+            state? := (← saveState)
+            diagnostics := .empty
+          } #[{
+            range? := mkNullNode (tac :: stxs).toArray |>.getRange?
+            task := next.result }]
+          withTheReader Term.Context ({ · with tacSnap? := some {
+            new := next
+            old? := oldNext?
+          } }) do
+            goOdd stxs
+        finally
+          next.resolve <| .mk { stx := .missing, diagnostics := .empty, state? := none } #[]
       else
         evalTactic tac
         goOdd stxs
   goOdd
-    | [] => do
-      if let some snap := (← readThe Term.Context).snap? then
-        snap.new.resolve <| .mk { stx := .missing, diagnostics := .empty } #[]
+    | [] => return
     | sep :: stxs => do
       saveTacticInfoForToken sep -- add `TacticInfo` node for `;`
-      goEven stxs
+      withTheReader Term.Context (fun ctx => { ctx with tacSnap? := ctx.tacSnap?.map fun snap =>
+        { snap with old? := do
+          let old ← snap.old?
+          guard <| sep.structRangeEq (old.stx.getArg 0)
+          some { old with stx := mkNullNode old.stx.getArgs[1:] } } }) do
+        goEven stxs
 
 @[builtin_tactic paren] def evalParen : Tactic := fun stx =>
   evalTactic stx[1]

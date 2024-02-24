@@ -112,6 +112,14 @@ structure State where
   letRecsToLift     : List LetRecToLift := []
   deriving Inhabited
 
+/--
+  Backtrackable state for the `TermElabM` monad.
+-/
+structure SavedState where
+  meta   : Meta.SavedState
+  «elab» : State
+  deriving Nonempty
+
 end Term
 
 namespace Tactic
@@ -155,14 +163,21 @@ structure Cache where
 section Snapshot
 open Language
 
+structure SavedState where
+  term   : Term.SavedState
+  tactic : State
+
 structure TacticEvaluatedSnapshotData extends Language.Snapshot where
-  stx : Syntax
+  stx    : Syntax
+  state? : Option SavedState
 deriving Nonempty
 
 /-- State after execution of a single synchronous tactic step. -/
 inductive TacticEvaluatedSnapshot where
   | mk (data : TacticEvaluatedSnapshotData) (next : Array (SnapshotTask TacticEvaluatedSnapshot))
 deriving Nonempty
+abbrev TacticEvaluatedSnapshot.data : TacticEvaluatedSnapshot → TacticEvaluatedSnapshotData
+  | .mk data _ => data
 /-- Potential, potentially parallel, follow-up tactic executions. -/
 -- In the first, non-parallel version, each task will depend on its predecessor
 abbrev TacticEvaluatedSnapshot.next : TacticEvaluatedSnapshot → Array (SnapshotTask TacticEvaluatedSnapshot)
@@ -230,7 +245,13 @@ structure Context where
   inPattern        : Bool := false
   /-- Cache for the `save` tactic. It is only `some` in the LSP server. -/
   tacticCache?     : Option (IO.Ref Tactic.Cache) := none
-  snap?            : Option (Language.SnapshotBundle Tactic.TacticEvaluatedSnapshot) := none
+  /--
+  Snapshot for incremental processing of current tactic, if any.
+
+  Invariant: if the bundle's `old?` is set, then the state *up to the start* of the tactic is
+  unchanged, i.e. reuse is possible.
+  -/
+  tacSnap?         : Option (Language.SyntaxGuardedSnapshotBundle Tactic.TacticEvaluatedSnapshot) := none
   /--
   If `true`, we store in the `Expr` the `Syntax` for recursive applications (i.e., applications
   of free variables tagged with `isAuxDecl`). We store the `Syntax` using `mkRecAppWithSyntax`.
@@ -261,14 +282,6 @@ open Meta
 
 instance : Inhabited (TermElabM α) where
   default := throw default
-
-/--
-  Backtrackable state for the `TermElabM` monad.
--/
-structure SavedState where
-  meta   : Meta.SavedState
-  «elab» : State
-  deriving Nonempty
 
 protected def saveState : TermElabM SavedState :=
   return { meta := (← Meta.saveState), «elab» := (← get) }

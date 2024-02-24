@@ -217,6 +217,19 @@ instance [ToSnapshotTree α] : ToSnapshotTree (Option α) where
   toSnapshotTree
     | some a => toSnapshotTree a
     | none   => default
+
+
+structure SyntaxGuarded (α : Type) where
+  stx : Syntax
+  val : α
+
+def SyntaxGuarded.get? (guarded : SyntaxGuarded α) (newStx : Syntax) : Option α :=
+  guard (newStx.structRangeEq guarded.stx) *> some guarded.val
+
+structure SyntaxGuardedSnapshotBundle (α : Type) where
+  old? : Option (SyntaxGuarded <| SnapshotTask α)
+  new  : IO.Promise α
+
 /--
   Option for printing end position of each message in addition to start position. Used for testing
   message ranges in the test suite. -/

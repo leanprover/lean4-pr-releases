@@ -28,7 +28,7 @@ structure DefViewElabHeader extends DefView, Command.DefViewElabHeaderData where
   Invariant: if the bundle's `old?` is set, then the state *up to the start* of the tactic block is
   unchanged, i.e. reuse is possible.
   -/
-  tacSnap? : Option (Language.SnapshotBundle (Option Tactic.TacticEvaluatedSnapshot))
+  tacSnap? : Option (Language.SyntaxGuardedSnapshotBundle Tactic.TacticEvaluatedSnapshot)
   /--
   Snapshot for incremental processing of definition body.
 
@@ -143,9 +143,10 @@ private def elabHeaders (views : Array DefView) (headersRef : IO.Ref (Array DefV
         if let some old := snap.old?.bind (·.get) then
           old.state.restore (restoreTrace := true) (restoreInfo := true)
           -- definitely resolved in `finally` of `elabMutualDef`
-          let (newTac?, newTacTask?) ← mkTacPromiseAndSnap view.value
+          let (newTac?, tacStx?, newTacTask?) ← mkTacPromiseAndSnap view.value
           let newBody ← IO.Promise.new
           snap.new.resolve <| some { old with
+            tacStx?
             tac? := newTacTask?
             bodyStx := view.value
             body := (← mkBodyTask view.value newBody)
@@ -160,7 +161,9 @@ private def elabHeaders (views : Array DefView) (headersRef : IO.Ref (Array DefV
           reuseBody := reuseBody && view.value.structRangeEq old.bodyStx
           headersRef.modify (·.push { old.view, view with
             tacSnap? := newTac?.map ({
-              old? := guard reuseTac *> old.tac?
+              old? := do
+                guard reuseTac
+                some ⟨(← old.tacStx?), (← old.tac?)⟩
               new := ·
             })
             bodySnap? := some {
@@ -210,13 +213,14 @@ private def elabHeaders (views : Array DefView) (headersRef : IO.Ref (Array DefV
               bodySnap? := none, tacSnap? := none }
             if let some snap := view.headerSnap? then
               -- definitely resolved in `finally` of `elabMutualDef`
-              let (newTac?, newTacTask?) ← mkTacPromiseAndSnap view.value
+              let (newTac?, tacStx?, newTacTask?) ← mkTacPromiseAndSnap view.value
               let newBody ← IO.Promise.new
               snap.new.resolve <| some {
                 diagnostics :=
                   (← Language.Snapshot.Diagnostics.ofMessageLog (← Core.getResetMessageLog))
                 view := newHeader.toDefViewElabHeaderData
                 state := (← saveState)
+                tacStx?
                 tac? := newTacTask?
                 bodyStx := view.value
                 body := (← mkBodyTask view.value newBody)
@@ -242,15 +246,16 @@ where
   with appropriate range.
   -/
   mkTacPromiseAndSnap (body : Syntax) :
-      TermElabM (Option (IO.Promise (Option Tactic.TacticEvaluatedSnapshot)) ×
-        Option (Language.SnapshotTask (Option Tactic.TacticEvaluatedSnapshot)))
+      TermElabM (Option (IO.Promise Tactic.TacticEvaluatedSnapshot) ×
+        Option Syntax ×
+        Option (Language.SnapshotTask Tactic.TacticEvaluatedSnapshot))
    := do
-    match body with
-    | `(Parser.Command.declVal| := by $tacs*) =>
-      -- definitely resolved in `finally` of `elabMutualDef`
-      let new ← IO.Promise.new
-      pure (some new, some { range? := mkNullNode tacs |>.getRange?, task := new.result })
-    | _ => pure (none, none)
+    if let `(Parser.Command.declVal| := $e:term) := body then
+      if let `(by $tacs*) := e then
+        -- definitely resolved in `finally` of `elabMutualDef`
+        let new ← IO.Promise.new
+        return (new, e, some { range? := mkNullNode tacs |>.getRange?, task := new.result })
+    return (none, none, none)
 
 /--
   Create auxiliary local declarations `fs` for the given hearders using their `shortDeclName` and `type`, given hearders, and execute `k fs`.
@@ -328,6 +333,8 @@ private def elabFunValues (headers : Array DefViewElabHeader) : TermElabM (Array
   headers.mapM fun header => do
     if let some snap := header.bodySnap? then
       if let some old := snap.old? then
+        -- guaranteed reusable as by the `bodySnap?` invariant, so let's wait on the previous
+        -- elaboration
         if let some old := old.get then
           old.state.restore (restoreTrace := true) (restoreInfo := true)
           snap.new.resolve <| some old
@@ -340,7 +347,8 @@ private def elabFunValues (headers : Array DefViewElabHeader) : TermElabM (Array
       for i in [0:header.binderIds.size] do
         -- skip auto-bound prefix in `xs`
         addLocalVarInfo header.binderIds[i]! xs[header.numParams - header.binderIds.size + i]!
-      let val ← elabTermEnsuringType valStx type
+      let val ← withReader ({ · with tacSnap? := header.tacSnap? }) do
+        elabTermEnsuringType valStx type <* Term.synthesizeSyntheticMVarsNoPostponing
       let val ← mkLambdaFVars xs val
       if let some snap := header.bodySnap? then
         snap.new.resolve <| some {
@@ -917,7 +925,8 @@ where
     finally
       -- definitely resolve snapshots created in `elabHeaders`
       for header in (← headersRef.get) do
-        header.tacSnap?.forM (·.new.resolve none)
+        header.tacSnap?.forM (·.new.resolve <|
+          .mk { stx := .missing, diagnostics := .empty, state? := none } #[])
         header.bodySnap?.forM (·.new.resolve none)
 
   processDeriving (headers : Array DefViewElabHeader) := do
