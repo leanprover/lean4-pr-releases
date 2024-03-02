@@ -233,13 +233,15 @@ private def elabHeaders (views : Array DefView) (headersRef : IO.Ref (Array DefV
             return newHeader
       headersRef.modify (·.push newHeader)
 where
+  getBodyTerm? (stx : Syntax) : Option Syntax :=
+    -- TODO: does not work with partial syntax
+    --| `(Parser.Command.declVal| := $body $_suffix:suffix $[$_where]?) => body
+    guard (stx.isOfKind ``Parser.Command.declValSimple) *> some stx[1]
+
   /-- Creates snapshot task with appropriate range from body syntax and promise. -/
   mkBodyTask (body : Syntax) (new : IO.Promise (Option Command.BodyProcessedSnapshot)) :
       TermElabM (Language.SnapshotTask (Option Command.BodyProcessedSnapshot)) := do
-    let rangeStx := match body with
-      -- do not include `:=` in body range so as not to highlight a header line as well
-      | `(Parser.Command.declVal| := $body $_suffix:suffix $[$_where]?) => body
-      | _ => body
+    let rangeStx := getBodyTerm? body |>.getD body
     return { range? := rangeStx.getRange?, task := new.result }
   /--
   If `body` allows for incremental tactic reporting and reuse, creates a promise and snapshot task
@@ -250,7 +252,7 @@ where
         Option Syntax ×
         Option (Language.SnapshotTask Tactic.TacticEvaluatedSnapshot))
    := do
-    if let `(Parser.Command.declVal| := $e:term) := body then
+    if let some e := getBodyTerm? body then
       if let `(by $tacs*) := e then
         -- definitely resolved in `finally` of `elabMutualDef`
         let new ← IO.Promise.new
