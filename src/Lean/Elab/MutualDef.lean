@@ -149,7 +149,7 @@ private def elabHeaders (views : Array DefView) (headersRef : IO.Ref (Array DefV
             tacStx?
             tac? := newTacTask?
             bodyStx := view.value
-            body := (← mkBodyTask view.value newBody)
+            body := mkBodyTask view.value newBody
           }
           -- Transition from `DefView.snap?` to `DefViewElabHeader.tacSnap?` invariant: if all
           -- headers and all previous bodies could be reused, then the state at the *start* of the
@@ -223,7 +223,7 @@ private def elabHeaders (views : Array DefView) (headersRef : IO.Ref (Array DefV
                 tacStx?
                 tac? := newTacTask?
                 bodyStx := view.value
-                body := (← mkBodyTask view.value newBody)
+                body := mkBodyTask view.value newBody
               }
               newHeader := { newHeader with
                 tacSnap? := newTac?.map ({ old? := none, new := · })
@@ -240,9 +240,9 @@ where
 
   /-- Creates snapshot task with appropriate range from body syntax and promise. -/
   mkBodyTask (body : Syntax) (new : IO.Promise (Option Command.BodyProcessedSnapshot)) :
-      TermElabM (Language.SnapshotTask (Option Command.BodyProcessedSnapshot)) := do
+      Language.SnapshotTask (Option Command.BodyProcessedSnapshot) :=
     let rangeStx := getBodyTerm? body |>.getD body
-    return { range? := rangeStx.getRange?, task := new.result }
+    { range? := rangeStx.getRange?, task := new.result }
   /--
   If `body` allows for incremental tactic reporting and reuse, creates a promise and snapshot task
   with appropriate range.
