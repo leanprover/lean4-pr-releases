@@ -45,7 +45,7 @@ where
           if tac.structRangeEq (old.stx.getArg 0) then
             let oldEvaluated := old.val.get
             if let some state := oldEvaluated.data.state? then
-              state.restore (restoreInfo := true) (restoreTrace := true)
+              state.restoreFull
               reused := true
               oldNext? := oldEvaluated.next.get? 0 |>.map (⟨mkNullNode old.stx.getArgs[1:], ·⟩)
         unless reused do

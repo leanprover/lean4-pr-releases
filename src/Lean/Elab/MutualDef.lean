@@ -141,7 +141,7 @@ private def elabHeaders (views : Array DefView) (headersRef : IO.Ref (Array DefV
         -- by the `DefView.headerSnap?` invariant, safe to reuse results at this point, so let's
         -- wait for them!
         if let some old := snap.old?.bind (·.get) then
-          old.state.restore (restoreTrace := true) (restoreInfo := true)
+          old.state.restoreFull
           -- definitely resolved in `finally` of `elabMutualDef`
           let (newTac?, tacStx?, newTacTask?) ← mkTacPromiseAndSnap view.value
           let newBody ← IO.Promise.new
@@ -338,7 +338,7 @@ private def elabFunValues (headers : Array DefViewElabHeader) : TermElabM (Array
         -- guaranteed reusable as by the `bodySnap?` invariant, so let's wait on the previous
         -- elaboration
         if let some old := old.get then
-          old.state.restore (restoreTrace := true) (restoreInfo := true)
+          old.state.restoreFull
           snap.new.resolve <| some old
           return old.value
 

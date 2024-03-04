@@ -286,18 +286,22 @@ instance : Inhabited (TermElabM α) where
 protected def saveState : TermElabM SavedState :=
   return { meta := (← Meta.saveState), «elab» := (← get) }
 
-def SavedState.restore (s : SavedState) (restoreTrace restoreInfo : Bool := false) :
-    TermElabM Unit := do
-  -- by default, we do not restore these as we want them logged even for aborted branches of
-  -- elaboration
-  let traceState ← getTraceState
-  let infoState ← getInfoState
+def SavedState.restore (s : SavedState) (restoreInfo : Bool := false) : TermElabM Unit := do
+  let traceState ← getTraceState -- We never backtrack trace message
+  let infoState ← getInfoState -- We also do not backtrack the info nodes when `restoreInfo == false`
   s.meta.restore
   set s.elab
-  unless restoreTrace do
-    setTraceState traceState
+  setTraceState traceState
   unless restoreInfo do
     setInfoState infoState
+
+/--
+Restores full state including sources for unique identifiers. Only intended for incremental reuse
+betweeen elaboration runs, not for backtracking within a single run.
+-/
+def SavedState.restoreFull (s : SavedState) : TermElabM Unit := do
+  s.meta.restoreFull
+  set s.elab
 
 instance : MonadBacktrack SavedState TermElabM where
   saveState      := Term.saveState
