@@ -55,7 +55,7 @@ where
             state? := (← saveState)
             diagnostics := .empty
           } #[{
-            range? := mkNullNode (tac :: stxs).toArray |>.getRange?
+            range? := mkNullNode stxs.toArray |>.getRange?
             task := next.result }]
           withTheReader Term.Context ({ · with tacSnap? := some {
             new := next
