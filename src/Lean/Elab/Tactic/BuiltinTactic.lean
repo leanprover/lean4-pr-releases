@@ -28,7 +28,11 @@ open Parser.Tactic
 @[builtin_tactic Lean.Parser.Tactic.«done»] def evalDone : Tactic := fun _ =>
   done
 
-@[builtin_tactic seq1] partial def evalSeq1 : Tactic := fun stx => do
+/--
+Evaluates a tactic script in form of a syntax node with alternating tactics and separators as
+children.
+ -/
+def evalSepTactics (stx : Syntax) : TacticM Unit := do
   goEven stx.getArgs.toList
 where
   goEven : _ → TacticM _
@@ -77,6 +81,9 @@ where
           guard <| sep.structRangeEq (old.stx.getArg 0)
           some { old with stx := mkNullNode old.stx.getArgs[1:] } } }) do
         goEven stxs
+
+@[builtin_tactic seq1] def evalSeq1 : Tactic := fun stx =>
+  evalSepTactics stx[0]
 
 @[builtin_tactic paren] def evalParen : Tactic := fun stx =>
   evalTactic stx[1]
@@ -145,19 +152,15 @@ def addCheckpoints (stx : Syntax) : TacticM Syntax := do
   output := output ++ currentCheckpointBlock
   return stx.setArgs output
 
-/-- Evaluate `sepByIndent tactic "; " -/
-def evalSepByIndentTactic (stx : Syntax) : TacticM Unit := do
-  evalSeq1 stx
-
 @[builtin_tactic tacticSeq1Indented] def evalTacticSeq1Indented : Tactic := fun stx =>
-  evalSepByIndentTactic stx[0]
+  evalSepTactics stx[0]
 
 @[builtin_tactic tacticSeqBracketed] def evalTacticSeqBracketed : Tactic := fun stx => do
   let initInfo ← mkInitialTacticInfo stx[0]
   withRef stx[2] <| closeUsingOrAdmit do
     -- save state before/after entering focus on `{`
     withInfoContext (pure ()) initInfo
-    evalSepByIndentTactic stx[1]
+    evalSepTactics stx[1]
 
 @[builtin_tactic cdot] def evalTacticCDot : Tactic := fun stx => do
   -- adjusted copy of `evalTacticSeqBracketed`; we used to use the macro
@@ -168,7 +171,7 @@ def evalSepByIndentTactic (stx : Syntax) : TacticM Unit := do
   withRef stx[0] <| closeUsingOrAdmit do
     -- save state before/after entering focus on `·`
     withInfoContext (pure ()) initInfo
-    evalSepByIndentTactic stx[1]
+    evalSepTactics stx[1]
 
 @[builtin_tactic Parser.Tactic.focus] def evalFocus : Tactic := fun stx => do
   let mkInfo ← mkInitialTacticInfo stx[0]

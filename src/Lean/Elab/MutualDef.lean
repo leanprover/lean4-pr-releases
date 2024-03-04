@@ -138,8 +138,8 @@ private def elabHeaders (views : Array DefView) (headersRef : IO.Ref (Array DefV
     let mut reuseBody := views.all (·.headerSnap?.any (·.old?.isSome))
     for view in views, ⟨shortDeclName, declName, levelNames⟩ in expandedDeclIds do
       if let some snap := view.headerSnap? then
-        -- by the `DefView.snap?` invariant, safe to reuse results at this point, so let's wait
-        -- for them!
+        -- by the `DefView.headerSnap?` invariant, safe to reuse results at this point, so let's
+        -- wait for them!
         if let some old := snap.old?.bind (·.get) then
           old.state.restore (restoreTrace := true) (restoreInfo := true)
           -- definitely resolved in `finally` of `elabMutualDef`
