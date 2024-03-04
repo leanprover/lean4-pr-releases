@@ -946,7 +946,8 @@ namespace Command
 def elabMutualDef (ds : Array Syntax) : CommandElabM Unit := do
   let substr? := (mkNullNode ds).getSubstring?
   let snap? := (← read).snap?
-  let mut views := #[]
+  -- NOTE: currently must be an IO.Ref as `mut` backtracks on `finally`
+  let viewsRef ← IO.mkRef #[]
   let mut headerSnaps := #[]
   try
     for h : i in [0:ds.size] do
@@ -978,14 +979,15 @@ def elabMutualDef (ds : Array Syntax) : CommandElabM Unit := do
           headerSubstr?
           processed := { range? := d.getRange?, task := new.result }
         }
-      views := views.push view
+      viewsRef.modify (·.push view)
     if let some snap := snap? then
       -- no non-fatal diagnostics at this point
       snap.new.resolve { headers := headerSnaps, diagnostics := .empty }
+    let views ← viewsRef.get
     runTermElabM fun vars => Term.elabMutualDef vars views
   finally
     -- definitely resolve snapshots created above
-    for view in views do
+    for view in (← viewsRef.get) do
       if let some snap := view.headerSnap? then
         snap.new.resolve none
 
