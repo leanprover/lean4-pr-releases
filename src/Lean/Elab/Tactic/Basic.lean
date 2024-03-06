@@ -94,6 +94,7 @@ protected def saveState : TacticM SavedState :=
 
 def SavedState.restore (b : SavedState) (restoreInfo := false) : TacticM Unit := do
   b.term.restore restoreInfo
+  set b.tactic
 
 /--
 Restores full state including sources for unique identifiers. Only intended for incremental reuse
