@@ -107,6 +107,10 @@ deriving Nonempty
 instance : Language.ToSnapshotTree HeadersParsedSnapshot where
   toSnapshotTree s := ⟨s.toSnapshot, s.headers.map (·.processed.map (sync := true) toSnapshotTree)⟩
 
+/-- Initial snapshot for incremental reuse and reporting in command elaboration. -/
+-- TODO: make inductive with `Dynamic` option
+abbrev InitSnapshot := HeadersParsedSnapshot
+
 end Snapshots
 
 structure Context where

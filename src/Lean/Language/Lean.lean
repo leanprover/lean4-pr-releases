@@ -196,6 +196,16 @@ instance : MonadLift (ProcessingT m) (LeanProcessingT m) where
   monadLift := fun act ctx => act ctx.toProcessingContext
 
 /--
+Embeds a `LeanProcessingT` action into `ProcessingT`, optionally using the old input string to
+speed up reuse analysis.
+-/
+def LeanProcessingT.run [Monad m] (act : LeanProcessingT m α) (oldInputCtx? : Option InputContext) :
+    ProcessingT m α := do
+  -- compute position of syntactic change once
+  let firstDiffPos? := oldInputCtx?.map (·.input.firstDiffPos (← read).input)
+  ReaderT.adapt ({ · with firstDiffPos? }) act
+
+/--
 Returns true if there was a previous run and the given position is before any textual change
 compared to it.
 -/
@@ -228,10 +238,7 @@ partial def process
     (setupImports : Syntax → ProcessingT IO (Except HeaderProcessedSnapshot Options) :=
       fun _ => pure <| .ok {})
     (old? : Option InitialSnapshot) : ProcessingM InitialSnapshot := do
-  -- compute position of syntactic change once
-  let firstDiffPos? := old?.map (·.ictx.input.firstDiffPos (← read).input)
-  ReaderT.adapt ({ · with firstDiffPos? }) do
-    parseHeader old?
+  parseHeader old? |>.run (old?.map (·.ictx))
 where
   parseHeader (old? : Option HeaderParsedSnapshot) : LeanProcessingM HeaderParsedSnapshot := do
     let ctx ← read
@@ -454,6 +461,21 @@ where
         infoTree? := some cmdState.infoState.trees[0]!
         cmdState
       }
+
+/--
+Convenience function for tool uses of the language processor that skips header handling.
+-/
+def processCommands (inputCtx : Parser.InputContext) (parserState : Parser.ModuleParserState)
+    (commandState : Command.State)
+    (old? : Option (Parser.InputContext × CommandParsedSnapshot) := none) :
+    BaseIO (SnapshotTask CommandParsedSnapshot) := do
+  process.parseCmd (old?.map (·.2)) parserState commandState
+    |>.run (old?.map (·.1))
+    |>.run { inputCtx with
+      mainModuleName := commandState.env.mainModule
+      opts := commandState.scopes.head!.opts
+    }
+
 
 /-- Waits for and returns final environment, if importing was successful. -/
 partial def getFinalEnv? (snap : InitialSnapshot) : Option Environment := do
