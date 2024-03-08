@@ -125,7 +125,7 @@ where
         |>.getAll.map (·.diagnostics.msgLog)
         |>.foldl (· ++ ·) {}
       return {
-        commandState := { snap.data.finished.get.cmdState with messages }
+        commandState := { snap.data.finishedSnap.get.cmdState with messages }
         parserState := snap.data.parserState
         cmdPos := snap.data.parserState.pos
         inputCtx, initialSnap, commands

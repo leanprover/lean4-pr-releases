@@ -99,9 +99,9 @@ structure CommandParsedSnapshotData extends Snapshot where
   /-- Resulting parser state. -/
   parserState : Parser.ModuleParserState
   /-- Definition headers processing task. -/
-  headers : SnapshotTask HeadersParsedSnapshot
+  headersSnap : SnapshotTask HeadersParsedSnapshot
   /-- State after processing is finished. -/
-  finished : SnapshotTask CommandFinishedSnapshot
+  finishedSnap : SnapshotTask CommandFinishedSnapshot
 deriving Nonempty
 
 /-- State after a command has been parsed. -/
@@ -121,8 +121,8 @@ abbrev CommandParsedSnapshot.next? : CommandParsedSnapshot →
 partial instance : ToSnapshotTree CommandParsedSnapshot where
   toSnapshotTree := go where
     go s := ⟨s.data.toSnapshot,
-      #[s.data.headers.map (sync := true) toSnapshotTree,
-        s.data.finished.map (sync := true) toSnapshotTree] |>
+      #[s.data.headersSnap.map (sync := true) toSnapshotTree,
+        s.data.finishedSnap.map (sync := true) toSnapshotTree] |>
         pushOpt (s.next?.map (·.map (sync := true) go))⟩
 
 
@@ -131,7 +131,7 @@ partial def CommandParsedSnapshot.cancel (snap : CommandParsedSnapshot) : BaseIO
   -- This is the only relevant computation right now
   -- TODO: cancel additional elaboration tasks if we add them without switching to implicit
   -- cancellation
-  snap.data.finished.cancel
+  snap.data.finishedSnap.cancel
   if let some next := snap.next? then
     -- recurse on next command (which may have been spawned just before we cancelled above)
     let _ ← IO.mapTask (sync := true) (·.cancel) next.task
@@ -362,15 +362,15 @@ where
       -- is not `Inhabited`
       return .pure <| .mk (nextCmdSnap? := none) {
         diagnostics := .empty, stx := .missing, parserState
-        headers := .pure { diagnostics := .empty, headers := #[] }
-        finished := .pure { diagnostics := .empty, cmdState }
+        headersSnap := .pure { diagnostics := .empty, headers := #[] }
+        finishedSnap := .pure { diagnostics := .empty, cmdState }
       }
 
     let unchanged old : BaseIO CommandParsedSnapshot :=
       -- when syntax is unchanged, reuse command processing task as is
       if let some oldNext := old.next? then
         return .mk (data := old.data)
-          (nextCmdSnap? := (← old.data.finished.bindIO (sync := true) fun oldFinished =>
+          (nextCmdSnap? := (← old.data.finishedSnap.bindIO (sync := true) fun oldFinished =>
             -- also wait on old command parse snapshot as parsing is cheap and may allow for
             -- elaboration reuse
             oldNext.bindIO (sync := true) fun oldNext => do
@@ -402,20 +402,20 @@ where
 
       -- definitely assigned in `doElab` task
       let headers ← IO.Promise.new
-      let finished ←
+      let finishedSnap ←
         doElab stx cmdState msgLog.hasErrors beginPos
-          { old? := old?.map (·.data.headers), new := headers } ctx
+          { old? := old?.map (·.data.headersSnap), new := headers } ctx
 
       let next? ← if Parser.isTerminalCommand stx then pure none
         -- for now, wait on "command finished" snapshot before parsing next command
-        else some <$> finished.bindIO fun finished =>
+        else some <$> finishedSnap.bindIO fun finished =>
           parseCmd none parserState finished.cmdState ctx
       return .mk (nextCmdSnap? := next?) {
         diagnostics := (← Snapshot.Diagnostics.ofMessageLog msgLog)
         stx
         parserState
-        headers := { range? := none, task := headers.result }
-        finished
+        headersSnap := { range? := none, task := headers.result }
+        finishedSnap
       }
 
   doElab (stx : Syntax) (cmdState : Command.State) (hasParseError : Bool) (beginPos : String.Pos)
@@ -488,6 +488,6 @@ where goCmd snap :=
   if let some next := snap.next? then
     goCmd next.get
   else
-    snap.data.finished.get.cmdState.env
+    snap.data.finishedSnap.get.cmdState.env
 
 end Lean

@@ -147,9 +147,9 @@ private def elabHeaders (views : Array DefView) (headersRef : IO.Ref (Array DefV
           let newBody ← IO.Promise.new
           snap.new.resolve <| some { old with
             tacStx?
-            tac? := newTacTask?
+            tacSnap? := newTacTask?
             bodyStx := view.value
-            body := mkBodyTask view.value newBody
+            bodySnap := mkBodyTask view.value newBody
           }
           -- Transition from `DefView.snap?` to `DefViewElabHeader.tacSnap?` invariant: if all
           -- headers and all previous bodies could be reused, then the state at the *start* of the
@@ -163,11 +163,11 @@ private def elabHeaders (views : Array DefView) (headersRef : IO.Ref (Array DefV
             tacSnap? := newTac?.map ({
               old? := do
                 guard reuseTac
-                some ⟨(← old.tacStx?), (← old.tac?)⟩
+                some ⟨(← old.tacStx?), (← old.tacSnap?)⟩
               new := ·
             })
             bodySnap? := some {
-              old? := guard reuseBody *> old.body
+              old? := guard reuseBody *> old.bodySnap
               new := newBody
             }
           })
@@ -221,9 +221,9 @@ private def elabHeaders (views : Array DefView) (headersRef : IO.Ref (Array DefV
                 view := newHeader.toDefViewElabHeaderData
                 state := (← saveState)
                 tacStx?
-                tac? := newTacTask?
+                tacSnap? := newTacTask?
                 bodyStx := view.value
-                body := mkBodyTask view.value newBody
+                bodySnap := mkBodyTask view.value newBody
               }
               newHeader := { newHeader with
                 tacSnap? := newTac?.map ({ old? := none, new := · })
@@ -973,12 +973,12 @@ def elabMutualDef (ds : Array Syntax) : CommandElabM Unit := do
             -- blocking wait, `HeadersParsedSnapshot` should be quick
             let oldParsed ← old.get.headers[i]?
             guard <| (← headerSubstr?).sameAs (← oldParsed.headerSubstr?)
-            oldParsed.processed
+            oldParsed.processedSnap
           new
         } }
         headerSnaps := headerSnaps.push {
           headerSubstr?
-          processed := { range? := d.getRange?, task := new.result }
+          processedSnap := { range? := d.getRange?, task := new.result }
         }
       viewsRef.modify (·.push view)
     if let some snap := snap? then

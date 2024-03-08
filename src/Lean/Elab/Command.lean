@@ -75,18 +75,18 @@ structure HeaderProcessedSnapshot extends Language.Snapshot where
   state : Term.SavedState
   tacStx? : Option Syntax
   /-- Incremental execution of main tactic block, if any. -/
-  tac? : Option (SnapshotTask Tactic.TacticEvaluatedSnapshot)
+  tacSnap? : Option (SnapshotTask Tactic.TacticEvaluatedSnapshot)
   /-- Syntax of definition body, for checking reuse of `body`. -/
   bodyStx : Syntax
   /-- Result of body elaboration. -/
-  body : SnapshotTask (Option BodyProcessedSnapshot)
+  bodySnap : SnapshotTask (Option BodyProcessedSnapshot)
 deriving Nonempty
 instance : Language.ToSnapshotTree HeaderProcessedSnapshot where
   toSnapshotTree s := ⟨s.toSnapshot,
-    (match s.tac? with
+    (match s.tacSnap? with
       | some tac => #[tac.map (sync := true) toSnapshotTree]
       | none     => #[]) ++
-    #[s.body.map (sync := true) toSnapshotTree]⟩
+    #[s.bodySnap.map (sync := true) toSnapshotTree]⟩
 
 /-- State before elaboration of a definition header. -/
 structure HeaderParsed where
@@ -96,7 +96,7 @@ structure HeaderParsed where
   -/
   headerSubstr? : Option Substring
   /-- Elaboration result, unless fatal exception occurred. -/
-  processed : SnapshotTask (Option HeaderProcessedSnapshot)
+  processedSnap : SnapshotTask (Option HeaderProcessedSnapshot)
 deriving Nonempty
 
 /-- Snapshot after syntax tree has been split into separate mutual def headers. -/
@@ -105,7 +105,7 @@ structure HeadersParsedSnapshot extends Language.Snapshot where
   headers : Array HeaderParsed
 deriving Nonempty
 instance : Language.ToSnapshotTree HeadersParsedSnapshot where
-  toSnapshotTree s := ⟨s.toSnapshot, s.headers.map (·.processed.map (sync := true) toSnapshotTree)⟩
+  toSnapshotTree s := ⟨s.toSnapshot, s.headers.map (·.processedSnap.map (sync := true) toSnapshotTree)⟩
 
 /-- Initial snapshot for incremental reuse and reporting in command elaboration. -/
 -- TODO: make inductive with `Dynamic` option
