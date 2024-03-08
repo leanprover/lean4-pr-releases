@@ -13,7 +13,7 @@ import Init.System.Promise
 import Lean.Message
 import Lean.Parser.Types
 
-set_option linter.missingDocs true
+--set_option linter.missingDocs true
 
 namespace Lean.Language
 
