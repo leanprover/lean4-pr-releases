@@ -6,6 +6,7 @@ Authors: Marc Huisinga, Wojciech Nawrocki
 -/
 prelude
 import Init.System.IO
+import Init.Data.Channel
 
 import Lean.Data.RBMap
 import Lean.Environment
@@ -66,12 +67,16 @@ structure WorkerContext where
   Latest document version received by the client, used for filtering out notifications from
   previous versions.
   -/
-  maxDocVersionRef : IO.Ref Nat
+  maxDocVersionRef : IO.Ref Int
   hLog             : FS.Stream
   initParams       : InitializeParams
   processor        : Parser.InputContext → BaseIO Lean.Language.Lean.InitialSnapshot
   clientHasWidgets : Bool
-  opts             : Options
+  /--
+  Options defined on the worker cmdline (i.e. not including options from `setup-file`), used for
+  context-free tasks such as editing delay.
+  -/
+  cmdlineOpts      : Options
 
 /-! # Asynchronous snapshot elaboration -/
 
@@ -99,23 +104,25 @@ section Elab
     allInfoTrees : Array Elab.InfoTree := #[]
     /-- New info trees encountered since we last sent a .ilean update notification. -/
     newInfoTrees : Array Elab.InfoTree := #[]
-    /-- Whether we should finish with a fatal progress notification. -/
-    isFatal := false
+    /-- Whether we encountered any snapshot with `Snapshot.isFatal`. -/
+    hasFatal := false
   deriving Inhabited
 
   register_builtin_option server.reportDelayMs : Nat := {
     defValue := 200
     group := "server"
     descr := "(server) time in milliseconds to wait before reporting progress and diagnostics on \
-      document edit in order to reduce flickering"
+      document edit in order to reduce flickering
+
+This option can only be set on the command line, not in the lakefile or via `set_option`."
   }
 
   /--
-  Type of cache stored in `Snapshot.Diagnostics.cacheRef?`.
+  Type of state stored in `Snapshot.Diagnostics.cacheRef?`.
 
   See also section "Communication" in Lean/Server/README.md.
   -/
-  structure CachedInteractiveDiagnostics where
+  structure MemorizedInteractiveDiagnostics where
     diags : Array Widget.InteractiveDiagnostic
   deriving TypeName
 
@@ -136,14 +143,14 @@ section Elab
   private partial def reportSnapshots (ctx : WorkerContext) (doc : EditableDocumentCore)
       (cancelTk : CancelToken) : BaseIO (Task Unit) := do
     let t ← BaseIO.asTask do
-      IO.sleep (server.reportDelayMs.get ctx.opts).toUInt32
+      IO.sleep (server.reportDelayMs.get ctx.cmdlineOpts).toUInt32
     BaseIO.bindTask t fun _ => do
       BaseIO.bindTask (← go (toSnapshotTree doc.initSnap) {}) fun st => do
         if (← cancelTk.isSet) then
           return .pure ()
 
         -- callback at the end of reporting
-        if st.isFatal then
+        if st.hasFatal then
           ctx.chanOut.send <| mkFileProgressAtPosNotification doc.meta 0 .fatalError
         else
           ctx.chanOut.send <| mkFileProgressDoneNotification doc.meta
@@ -158,25 +165,22 @@ section Elab
       ctx.chanOut.send <| mkPublishDiagnosticsNotification doc.meta <|
         (← doc.diagnosticsRef.get).map (·.toDiagnostic)
     go (node : SnapshotTree) (st : ReportSnapshotsState) : BaseIO (Task ReportSnapshotsState) := do
-      if (← IO.checkCanceled) then
-        return .pure st
-
       if !node.element.diagnostics.msgLog.isEmpty then
         let diags ←
-          if let some cached ← node.element.diagnostics.cacheRef?.bindM fun cacheRef => do
-              return (← cacheRef.get).bind (·.get? CachedInteractiveDiagnostics) then
-            pure cached.diags
+          if let some memorized ← node.element.diagnostics.interactiveDiagsRef?.bindM fun ref => do
+              return (← ref.get).bind (·.get? MemorizedInteractiveDiagnostics) then
+            pure memorized.diags
           else
-            let diags ← node.element.diagnostics.msgLog.toList.toArray.mapM
+            let diags ← node.element.diagnostics.msgLog.toArray.mapM
               (Widget.msgToInteractiveDiagnostic doc.meta.text · ctx.clientHasWidgets)
-            if let some cacheRef := node.element.diagnostics.cacheRef? then
-              cacheRef.set <| some <| .mk { diags : CachedInteractiveDiagnostics }
+            if let some cacheRef := node.element.diagnostics.interactiveDiagsRef? then
+              cacheRef.set <| some <| .mk { diags : MemorizedInteractiveDiagnostics }
             pure diags
         doc.diagnosticsRef.modify (· ++ diags)
         if st.hasBlocked then
           publishDiagnostics
 
-      let mut st := { st with isFatal := st.isFatal || node.element.isFatal }
+      let mut st := { st with hasFatal := st.hasFatal || node.element.isFatal }
 
       if let some itree := node.element.infoTree? then
         let mut newInfoTrees := st.newInfoTrees.push itree
@@ -186,6 +190,7 @@ section Elab
         st := { st with newInfoTrees, allInfoTrees := st.allInfoTrees.push itree }
 
       goSeq st node.children.toList
+
     goSeq (st : ReportSnapshotsState) :
         List (SnapshotTask SnapshotTree) → BaseIO (Task ReportSnapshotsState)
       | [] => return .pure st
@@ -225,6 +230,10 @@ abbrev WorkerM := ReaderT WorkerContext <| StateRefT WorkerState IO
 private builtin_initialize importsLoadedRef : IO.Ref Bool ← IO.mkRef false
 
 open Language Lean in
+/--
+Callback from Lean language processor after parsing imports that requests necessary information from
+Lake for processing imports.
+-/
 def setupImports (meta : DocumentMeta) (chanOut : Channel JsonRpc.Message)
     (srcSearchPathPromise : Promise SearchPath) (stx : Syntax) :
     Language.ProcessingT IO (Except Language.Lean.HeaderProcessedSnapshot Options) := do
@@ -236,7 +245,7 @@ def setupImports (meta : DocumentMeta) (chanOut : Channel JsonRpc.Message)
     unless (← IO.checkCanceled) do
       IO.Process.exit 2  -- signal restart request to watchdog
     -- should not be visible to user as task is already canceled
-    return .error { diagnostics := .empty, success? := none }
+    return .error { diagnostics := .empty, result? := none }
 
   let imports := Elab.headerToImports stx
   let fileSetupResult ← setupFile meta imports fun stderrLine => do
@@ -256,12 +265,12 @@ def setupImports (meta : DocumentMeta) (chanOut : Channel JsonRpc.Message)
       diagnostics := (← Language.diagnosticsOfHeaderError
         "Imports are out of date and must be rebuilt; \
           use the \"Restart File\" command in your editor.")
-      success? := none
+      result? := none
     }
   | .error msg =>
     return .error {
       diagnostics := (← diagnosticsOfHeaderError msg)
-      success? := none
+      result? := none
     }
   | _ => pure ()
 
@@ -292,7 +301,7 @@ section Initialization
       processor
       clientHasWidgets
       maxDocVersionRef
-      opts
+      cmdlineOpts := opts
     }
     let doc : EditableDocumentCore := {
       meta, initSnap
@@ -318,13 +327,14 @@ section Initialization
       let _ ← chanOut.forAsync (prio := .dedicated) fun msg => do
         -- discard outdated notifications; note that in contrast to responses, notifications can
         -- always be silently discarded
-        let version? : Option Nat := do
-          let doc ← match msg with
-            | .notification "textDocument/publishDiagnostics" (some <| .obj params) => some params
-            | .notification "$/lean/fileProgress" (some <| .obj params) =>
-              params.find compare "textDocument" |>.bind (·.getObj?.toOption)
-            | _ => none
-          doc.find compare "version" |>.bind (·.getNat?.toOption)
+        let version? : Option Int := do match msg with
+          | .notification "textDocument/publishDiagnostics" (some params) =>
+            let params : PublishDiagnosticsParams ← fromJson? (toJson params) |>.toOption
+            params.version?
+          | .notification "$/lean/fileProgress" (some params) =>
+            let params : LeanFileProgressParams ← fromJson? (toJson params) |>.toOption
+            params.textDocument.version?
+          | _ => none
         if let some version := version? then
           if version < (← maxDocVersion.get) then
             return
@@ -425,12 +435,25 @@ section MessageHandling
   def handleGetInteractiveDiagnosticsRequest (params : GetInteractiveDiagnosticsParams) :
       WorkerM (Array InteractiveDiagnostic) := do
     let st ← get
+    -- NOTE: always uses latest document (which is the only one we can retrieve diagnostics for);
+    -- any race should be temporary as the client should re-request interactive diagnostics when
+    -- they receive the non-interactive diagnostics for the new document
     let diags ← st.doc.diagnosticsRef.get
+    -- NOTE: does not wait for `lineRange?` to be fully elaborated, which would be problematic with
+    -- fine-grained incremental reporting anyway; instead, the client is obligated to resend the
+    -- request when the non-interactive diagnostics of this range have changed
     return diags.filter fun diag =>
+      let r := diag.fullRange
+      let diagStartLine := r.start.line
+      let diagEndLine   :=
+        if r.end.character == 0 then
+          r.end.line
+        else
+          r.end.line + 1
       params.lineRange?.all fun ⟨s, e⟩ =>
-        -- does [s,e) intersect [diag.fullRange.start.line,diag.fullRange.end.line)?
-        s ≤ diag.fullRange.start.line ∧ diag.fullRange.start.line < e ∨
-        diag.fullRange.start.line ≤ s ∧ s < diag.fullRange.end.line
+        -- does [s,e) intersect [diagStartLine,diagEndLine)?
+        s ≤ diagStartLine ∧ diagStartLine < e ∨
+        diagStartLine ≤ s ∧ s < diagEndLine
 
   def handleImportCompletionRequest (id : RequestID) (params : CompletionParams)
       : WorkerM (Task (Except Error AvailableImportsCache)) := do

@@ -927,9 +927,10 @@ where
     finally
       -- definitely resolve snapshots created in `elabHeaders`
       for header in (← headersRef.get) do
-        header.tacSnap?.forM (·.new.resolve <|
-          .mk { stx := .missing, diagnostics := .empty, state? := none } #[])
-        header.bodySnap?.forM (·.new.resolve none)
+        if let some snap := header.tacSnap? then
+          snap.new.resolve <| .mk { stx := .missing, diagnostics := .empty, state? := none } #[]
+        if let some snap := header.bodySnap? then
+          snap.new.resolve none
 
   processDeriving (headers : Array DefViewElabHeader) := do
     for header in headers, view in views do

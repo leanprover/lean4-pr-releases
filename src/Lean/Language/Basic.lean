@@ -8,36 +8,12 @@ driver. See the [server readme](../Server/README.md#worker-architecture) for an 
 Authors: Sebastian Ullrich
 -/
 
+prelude
+import Init.System.Promise
 import Lean.Message
 import Lean.Parser.Types
 
 set_option linter.missingDocs true
-
--- early declarations for `fileSetupHandler?` below; as the field is used only by the worker, we
--- leave them in that namespace
-namespace Lean.Server.FileWorker
-
-/-- Categorizes possible outcomes of running `lake setup-file`. -/
-inductive FileSetupResultKind where
-  /-- File configuration loaded and dependencies updated successfully. -/
-  | success
-  /-- No Lake project found, no setup was done. -/
-  | noLakefile
-  /-- Imports must be rebuilt but `--no-build` was specified. -/
-  | importsOutOfDate
-  /-- Other error during Lake invocation. -/
-  | error (msg : String)
-
-/-- Result of running `lake setup-file`. -/
-structure FileSetupResult where
-  /-- Kind of outcome. -/
-  kind          : FileSetupResultKind
-  /-- Search path from successful setup, or else empty. -/
-  srcSearchPath : SearchPath
-  /-- Additional options from successful setup, or else empty. -/
-  fileOptions   : Options
-
-end Lean.Server.FileWorker
 
 namespace Lean.Language
 
@@ -46,18 +22,18 @@ structure Snapshot.Diagnostics.ID where
   private id : Nat
 deriving Nonempty, BEq, Ord
 
-/-- `MessageLog` with caching of interactive diagnostics. -/
+/-- `MessageLog` with interactive diagnostics. -/
 structure Snapshot.Diagnostics where
   /-- Non-interactive message log. -/
   msgLog : MessageLog
   /--
-  Dynamic mutable slot usable by the language server for caching interactive diagnostics.  If
-  `none`, no caching is done, which should only be used for messages not containing any interactive
-  elements.
+  Dynamic mutable slot usable by the language server for memorizing interactive diagnostics. If
+  `none`, interactive diagnostics are not remembered, which should only be used for messages not
+  containing any interactive elements as client-side state will be lost on recreating a diagnostic.
 
   See also section "Communication" in Lean/Server/README.md.
   -/
-  cacheRef? : Option (IO.Ref (Option Dynamic))
+  interactiveDiagsRef? : Option (IO.Ref (Option Dynamic))
 deriving Inhabited
 
 /-- Next ID to be used for `Snapshot.Diagnostics.id?`. -/
@@ -72,16 +48,8 @@ def Snapshot.Diagnostics.ID.new : BaseIO ID :=
 /-- The empty set of diagnostics. -/
 def Snapshot.Diagnostics.empty : Snapshot.Diagnostics where
   msgLog := .empty
-  -- nothing to cache
-  cacheRef? := none
-
-/--
-Creates snapshot message log from non-interactive message log, caching derived interactive
-diagnostics.
--/
-def Snapshot.Diagnostics.ofMessageLog (msgLog : Lean.MessageLog) :
-    BaseIO Snapshot.Diagnostics := do
-  return { msgLog, cacheRef? := some (← IO.mkRef none) }
+  -- nothing to memorize
+  interactiveDiagsRef? := none
 
 /--
   The base class of all snapshots: all the generic information the language server needs about a
@@ -114,7 +82,7 @@ structure SnapshotTask (α : Type) where
   task : Task α
 deriving Nonempty
 
-/-- Creates a snapshot task from a range and a `BaseIO` action. -/
+/-- Creates a snapshot task from a reporting range and a `BaseIO` action. -/
 def SnapshotTask.ofIO (range? : Option String.Range) (act : BaseIO α) : BaseIO (SnapshotTask α) := do
   return {
     range?
@@ -276,6 +244,14 @@ abbrev ProcessingM := ProcessingT BaseIO
 
 instance : MonadLift ProcessingM (ProcessingT IO) where
   monadLift := fun act ctx => act ctx
+
+/--
+Creates snapshot message log from non-interactive message log, also allocating a mutable cell
+that can be used by the server to memorize interactive diagnostics derived from the log.
+-/
+def Snapshot.Diagnostics.ofMessageLog (msgLog : Lean.MessageLog) :
+    BaseIO Snapshot.Diagnostics := do
+  return { msgLog, interactiveDiagsRef? := some (← IO.mkRef none) }
 
 /-- Creates diagnostics from a single error message that should span the whole file. -/
 def diagnosticsOfHeaderError (msg : String) : ProcessingM Snapshot.Diagnostics := do
