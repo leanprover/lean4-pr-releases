@@ -893,6 +893,7 @@ where
   go := do
     let scopeLevelNames ← getLevelNames
     let headersRef ← IO.mkRef #[]
+    let _ := MonadAlwaysExcept.except (m := TermElabM)
     try
       elabHeaders views headersRef
       let headers ← levelMVarToParamHeaders views (← headersRef.get)

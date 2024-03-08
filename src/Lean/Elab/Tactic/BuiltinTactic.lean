@@ -53,6 +53,7 @@ where
             evalTactic tac
         -- definitely resolved below
         let next ← IO.Promise.new
+        let _ := MonadAlwaysExcept.except (m := TacticM)
         try
           snap.new.resolve <| .mk {
             stx := tac
