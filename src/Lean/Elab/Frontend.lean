@@ -124,8 +124,10 @@ where
       let messages := toSnapshotTree initialSnap
         |>.getAll.map (·.diagnostics.msgLog)
         |>.foldl (· ++ ·) {}
+      let trees := toSnapshotTree initialSnap
+        |>.getAll.map (·.infoTree?) |>.filterMap id |>.toPArray'
       return {
-        commandState := { snap.data.finishedSnap.get.cmdState with messages }
+        commandState := { snap.data.finishedSnap.get.cmdState with messages, infoState.trees := trees }
         parserState := snap.data.parserState
         cmdPos := snap.data.parserState.pos
         inputCtx, initialSnap, commands
