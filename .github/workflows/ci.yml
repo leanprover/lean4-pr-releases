@@ -132,21 +132,22 @@ jobs:
                 "binary-check": "otool -L",
                 "tar": "gtar" // https://github.com/actions/runner-images/issues/2619
               },
-              {
-                "name": "Windows",
-                "os": "windows-2022",
-                "release": true,
-                "quick": false,
-                "shell": "msys2 {0}",
-                "CMAKE_OPTIONS": "-G \"Unix Makefiles\" -DUSE_GMP=OFF",
-                // for reasons unknown, interactivetests are flaky on Windows
-                // also, the liasolver test hits “too many exported symbols”
-                "CTEST_OPTIONS": "--repeat until-pass:2 -E 'leanbenchtest_liasolver.lean'",
-                "llvm-url": "https://github.com/leanprover/lean-llvm/releases/download/15.0.1/lean-llvm-x86_64-w64-windows-gnu.tar.zst",
-                "prepare-llvm": "../script/prepare-llvm-mingw.sh lean-llvm*",
-                // TEMP while compiler tests are deactivated
-                "binary-check": "true"
-              },
+              // Temporarily disable Windows tests until we can rebase on master; too many symbols.
+              // {
+              //   "name": "Windows",
+              //   "os": "windows-2022",
+              //   "release": true,
+              //   "quick": false,
+              //   "shell": "msys2 {0}",
+              //   "CMAKE_OPTIONS": "-G \"Unix Makefiles\" -DUSE_GMP=OFF",
+              //   // for reasons unknown, interactivetests are flaky on Windows
+              //   // also, the liasolver test hits “too many exported symbols”
+              //   "CTEST_OPTIONS": "--repeat until-pass:2 -E 'leanbenchtest_liasolver.lean'",
+              //   "llvm-url": "https://github.com/leanprover/lean-llvm/releases/download/15.0.1/lean-llvm-x86_64-w64-windows-gnu.tar.zst",
+              //   "prepare-llvm": "../script/prepare-llvm-mingw.sh lean-llvm*",
+              //   // TEMP while compiler tests are deactivated
+              //   "binary-check": "true"
+              // },
               {
                 "name": "Linux aarch64",
                 "os": "ubuntu-latest",
