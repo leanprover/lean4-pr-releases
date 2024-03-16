@@ -539,7 +539,10 @@ def elabCheckCore (ignoreStuckTC : Bool) : CommandElab
         for c in (← realizeGlobalConstWithInfos term) do
           addCompletionInfo <| .id term id.getId (danglingDot := false) {} none
           logInfoAt tk <| .ofPPFormat { pp := fun
-            | some ctx => ctx.runMetaM <| PrettyPrinter.ppSignature c
+            | some ctx => do
+              match (← ctx.runMetaM (PrettyPrinter.ppSignature c) |>.toBaseIO) with
+              | .ok fmt => return fmt
+              | .error ex => return f!"[Error pretty printing signature: {ex}]{Format.line}{c}"
             | none     => return f!"{c}"  -- should never happen
           }
           return
