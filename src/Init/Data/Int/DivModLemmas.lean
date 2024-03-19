@@ -487,7 +487,6 @@ theorem mul_emod (a b n : Int) : (a * b) % n = (a % n) * (b % n) % n := by
     ← emod_add_ediv a n, ← emod_add_ediv' b n, Int.add_mul, Int.mul_add, Int.mul_add,
     Int.mul_assoc, Int.mul_assoc, ← Int.mul_add n _ _, add_mul_emod_self_left,
     ← Int.mul_assoc, add_mul_emod_self]
-  rfl
 
 @[local simp] theorem emod_self {a : Int} : a % a = 0 := by
   have := mul_emod_left 1 a; rwa [Int.one_mul] at this
@@ -500,7 +499,6 @@ theorem mul_emod (a b n : Int) : (a * b) % n = (a % n) * (b % n) % n := by
 
 @[simp] theorem emod_emod (a b : Int) : (a % b) % b = a % b := by
   conv => rhs; rw [← emod_add_ediv a b, add_mul_emod_self_left]
-  rfl
 
 theorem sub_emod (a b n : Int) : (a - b) % n = (a % n - b % n) % n := by
   apply (emod_add_cancel_right b).mp
