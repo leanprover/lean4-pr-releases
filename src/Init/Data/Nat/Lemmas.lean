@@ -903,10 +903,12 @@ theorem bodd_mul (m n : Nat) : bodd (m * n) = (bodd m && bodd n) := by
     simp [mul_succ, ih]
     cases bodd m <;> cases bodd n <;> rfl
 
+@[simp]
 theorem bodd_bit (b n) : bodd (bit b n) = b := by
   rw [bit_val, Nat.mul_comm, Nat.add_comm, bodd_add, bodd_mul]
   cases b <;> cases bodd n <;> rfl
 
+@[simp]
 theorem _root_.Bool.bodd_toNat (b : Bool) : bodd b.toNat = b := by
   cases b <;> rfl
 
