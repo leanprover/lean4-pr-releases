@@ -236,7 +236,7 @@ theorem testBit_two_pow_sub_succ (h₂ : x < 2 ^ n) (i : Nat) :
     match n with
     | 0 => simp
     | n+1 =>
-      simp [not_decide_mod_two_eq_one, Nat.bodd]
+      simp [not_decide_mod_two_eq_one, Nat.bodd, ← decide_mod_two_eq_one]
       omega
   | succ i ih =>
     simp only [testBit_succ]
