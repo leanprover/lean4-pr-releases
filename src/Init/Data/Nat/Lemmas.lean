@@ -907,6 +907,9 @@ theorem bodd_bit (b n) : bodd (bit b n) = b := by
   rw [bit_val, Nat.mul_comm, Nat.add_comm, bodd_add, bodd_mul]
   cases b <;> cases bodd n <;> rfl
 
+theorem _root_.Bool.bodd_toNat (b : Bool) : bodd b.toNat = b := by
+  cases b <;> rfl
+
 /-! ### div2 -/
 
 @[simp]
