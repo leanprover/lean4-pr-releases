@@ -715,7 +715,6 @@ theorem toNat_cons' {x : BitVec w} :
     have p2 : i ≠ n := by omega
     simp [p1, p2]
   · simp [i_eq_n, testBit_toNat]
-    cases b <;> trivial
   · have p1 : i ≠ n := by omega
     have p2 : i - n ≠ 0 := by omega
     simp [p1, p2, Nat.testBit_bool_to_nat]
