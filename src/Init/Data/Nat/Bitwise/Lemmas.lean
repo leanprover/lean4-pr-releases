@@ -18,7 +18,6 @@ This module defines properties of the bitwise operations on Natural numbers.
 It is primarily intended to support the bitvector library.
 -/
 
-
 namespace Nat
 
 @[local simp]
