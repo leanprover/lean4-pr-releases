@@ -52,11 +52,17 @@ structure PPFns where
   ppGoal : PPContext → MVarId → IO Format
   deriving Inhabited
 
+def formatRawTerm (ctx : PPContext) (stx : Term) : Format :=
+  stx.raw.formatStx (some <| pp.raw.maxDepth.get ctx.opts) (pp.raw.showInfo.get ctx.opts)
+
+def formatRawGoal (mvarId : MVarId) : Format :=
+  "goal" ++ format (mkMVar mvarId)
+
 builtin_initialize ppFnsRef : IO.Ref PPFns ←
   IO.mkRef {
     ppExprWithInfos := fun _ e => return format (toString e)
-    ppTerm := fun ctx stx => return stx.raw.formatStx (some <| pp.raw.maxDepth.get ctx.opts) (pp.raw.showInfo.get ctx.opts)
-    ppGoal := fun _ mvarId => return "goal" ++ format (mkMVar mvarId)
+    ppTerm := fun ctx stx => return formatRawTerm ctx stx
+    ppGoal := fun _ mvarId => return formatRawGoal mvarId
   }
 
 builtin_initialize ppExt : EnvExtension PPFns ←
@@ -76,25 +82,23 @@ def ppExprWithInfos (ctx : PPContext) (e : Expr) : BaseIO FormatWithInfos := do
         pure f!"failed to pretty print expression (use 'set_option pp.rawOnError true' for raw representation)"
 
 def ppTerm (ctx : PPContext) (stx : Term) : BaseIO Format := do
-  let fmtRaw := fun () => stx.raw.formatStx (some <| pp.raw.maxDepth.get ctx.opts) (pp.raw.showInfo.get ctx.opts)
   if pp.raw.get ctx.opts then
-    return fmtRaw ()
+    return formatRawTerm ctx stx
   else
     match (← ppExt.getState ctx.env |>.ppTerm ctx stx  |>.toBaseIO) with
     | .ok fmt => return fmt
     | .error ex =>
       if pp.rawOnError.get ctx.opts then
-        pure f!"[Error pretty printing syntax: {ex}. Falling back to raw printer.]{Format.line}{fmtRaw ()}"
+        pure f!"[Error pretty printing syntax: {ex}. Falling back to raw printer.]{Format.line}{formatRawTerm ctx stx}"
       else
         pure f!"failed to pretty print term (use 'set_option pp.rawOnError true' for raw representation)"
 
 def ppGoal (ctx : PPContext) (mvarId : MVarId) : BaseIO Format := do
-  let fmtRaw := fun () => "goal " ++ format (mkMVar mvarId)
   match (← ppExt.getState ctx.env |>.ppGoal ctx mvarId |>.toBaseIO) with
   | .ok fmt => return fmt
   | .error ex =>
     if pp.rawOnError.get ctx.opts then
-      pure f!"[Error pretty printing goal: {ex}. Falling back to raw printer.]{Format.line}{fmtRaw ()}"
+      pure f!"[Error pretty printing goal: {ex}. Falling back to raw printer.]{Format.line}{formatRawGoal mvarId}"
     else
       pure f!"failed to pretty print goal (use 'set_option pp.rawOnError true' for raw representation)"
 

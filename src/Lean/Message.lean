@@ -139,7 +139,7 @@ where
 partial def formatAux : NamingContext → Option MessageDataContext → MessageData → BaseIO Format
   | _,    _,         ofFormat fmt             => return fmt
   | nCtx, ctx?,      ofPPFormat f             => (·.fmt) <$> f.pp (ctx?.map (mkPPContext nCtx))
-  | _,    none,      ofGoal mvarId            => return "goal " ++ format (mkMVar mvarId)
+  | _,    none,      ofGoal mvarId            => return formatRawGoal mvarId
   | nCtx, some ctx,  ofGoal mvarId            => ppGoal (mkPPContext nCtx ctx) mvarId
   | nCtx, _,         withContext ctx d        => formatAux nCtx ctx d
   | _,    ctx,       withNamingContext nCtx d => formatAux nCtx ctx d
