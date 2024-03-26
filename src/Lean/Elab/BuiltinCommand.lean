@@ -538,13 +538,7 @@ def elabCheckCore (ignoreStuckTC : Bool) : CommandElab
       try
         for c in (← realizeGlobalConstWithInfos term) do
           addCompletionInfo <| .id term id.getId (danglingDot := false) {} none
-          logInfoAt tk <| .ofPPFormat { pp := fun
-            | some ctx => do
-              match (← ctx.runMetaM (PrettyPrinter.ppSignature c) |>.toBaseIO) with
-              | .ok fmt => return fmt
-              | .error ex => return f!"[Error pretty printing signature: {ex}]{Format.line}{c}"
-            | none     => return f!"{c}"  -- should never happen
-          }
+          logInfoAt tk <| .ofSignature c
           return
       catch _ => pure ()  -- identifier might not be a constant but constant + projection
     let e ← Term.elabTerm term none
