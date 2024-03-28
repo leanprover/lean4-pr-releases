@@ -117,13 +117,12 @@ def Workspace.updateAndMaterialize (ws : Workspace)
       if let some oldRelPkgsDir := manifest.packagesDir? then
         let oldPkgsDir := ws.dir / oldRelPkgsDir
         if oldRelPkgsDir.normalize != ws.relPkgsDir.normalize && (← oldPkgsDir.pathExists) then
+          logInfo s!"workspace packages directory changed; renaming '{oldPkgsDir}' to '{ws.pkgsDir}'"
           let doRename : IO Unit := do
             createParentDirs ws.pkgsDir
             IO.FS.rename oldPkgsDir ws.pkgsDir
           if let .error e ← doRename.toBaseIO then
-            error <|
-              s!"{ws.root.name}: could not rename packages directory " ++
-              s!"({oldPkgsDir} -> {ws.pkgsDir}): {e}"
+            error s!"could not rename workspace packages directory: {e}"
     | .error (.noFileOrDirectory ..) =>
       logInfo s!"{ws.root.name}: no previous manifest, creating one from scratch"
     | .error e =>
